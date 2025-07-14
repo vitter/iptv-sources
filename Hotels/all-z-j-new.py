@@ -14,6 +14,15 @@ import aiohttp
 #jsmpeg-streamer fid="OBfgOOMpjONAJ/cQ1FpaDQ=="
 #txiptv fid="7v4hVyd8x6RxODJO2Q5u5Q=="
 #zhgxtv fid="IVS0q72nt9BgY+hjPVH+ZQ=="
+#
+#智慧光迅平台(广东公司) body="ZHGXTV"
+#/ZHGXTV/Public/json/live_interface.txt
+#http://ip:port/hls/1/index.m3u8
+#智慧桌面 智能KUTV(陕西公司) body="/iptv/live/zh_cn.js"
+#http://ip:port/tsfile/live/0001_1.m3u8
+#华视美达 华视私云(浙江公司) body="华视美达"
+#http://ip:port/newlive/live/hls/1/live.m3u8
+#
 # ===================== 通用工具 =====================
 def channel_name_normalize(name):
     name = name.replace("cctv", "CCTV")
