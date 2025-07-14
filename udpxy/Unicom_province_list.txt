@@ -1,0 +1,3 @@
+city file stream
+Shanghai Shanghai_103 udp/238.200.200.130:5540
+Hebei Hebei udp/239.253.92.83:8012
