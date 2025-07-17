@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
-IPTV IP 搜索与测速综合工具 - 新版本
+IPTV(udpxy) IP 搜索与测速综合工具 - 新版本
 
-使用FOFA登录cookie进行搜索，移除代理逻辑
-合并了 update_ip.sh 和 speedtest_from_list.sh 的功能，
-使用 all-z-new.py 中的测速逻辑替代 ffmpeg 测速。
+使用FOFA API 或登录Cookie进行搜索，Quake360使用Token认证
 
 功能：
-1. 从 FOFA 和 Quake360 搜索 IP (使用cookie认证)
+1. 从 FOFA 和 Quake360 搜索 udpxy IP（FOFA支持API密钥和Cookie认证，Quake360使用Token认证）
 2. 端口连通性测试
 3. HTTP/M3U8 流媒体测速
 4. 生成结果文件
@@ -15,6 +13,16 @@ IPTV IP 搜索与测速综合工具 - 新版本
 用法：
 python speedtest_integrated_new.py <省市> <运营商>
 例如：python speedtest_integrated_new.py Shanghai Telecom
+
+认证方式：
+- FOFA：配置了FOFA_API_KEY时优先使用API方式，失败时回退到Cookie；未配置则使用Cookie方式
+- Quake360：使用QUAKE360_TOKEN进行API认证
+- FOFA 必须配置Cookie，QUAKE360必须配置Token
+- 支持多线程加速搜索和测速
+
+注意事项：
+- 确保在运行前设置了必要的环境变量（见 .env.example 文件）
+- 需要安装 requests 和 python-dotenv 库
 """
 
 import argparse
@@ -47,10 +55,13 @@ class IPTVSpeedTest:
         # 从环境变量读取配置并清理格式
         self.quake360_token = os.getenv('QUAKE360_TOKEN')
         self.fofa_user_agent = os.getenv('FOFA_USER_AGENT')
+        self.fofa_api_key = os.getenv('FOFA_API_KEY', '')  # 可选的API密钥
         
         # 清理Cookie字符串 - 移除换行符、回车符和多余空格
-        raw_cookie = os.getenv('FOFA_COOKIE', '')
-        self.fofa_cookie = self._clean_cookie_string(raw_cookie)
+        raw_fofa_cookie = os.getenv('FOFA_COOKIE', '')
+        self.fofa_cookie = self._clean_cookie_string(raw_fofa_cookie)
+        
+        # Quake360 简化配置 - 只使用Token认证
         
         # 验证必要的配置
         self._validate_config()
@@ -90,6 +101,7 @@ class IPTVSpeedTest:
         """验证必要的配置是否已设置"""
         missing_configs = []
         
+        # Quake360配置检查 - 只需要Token
         if not self.quake360_token:
             missing_configs.append('QUAKE360_TOKEN')
         
@@ -107,7 +119,20 @@ class IPTVSpeedTest:
             print("参考.env.example文件中的格式。")
             sys.exit(1)
         
+        # 显示配置状态
         print("✓ 配置验证通过")
+        print("配置状态:")
+        print(f"  FOFA Cookie: ✓")
+        print(f"  Quake360 Token: {'✓' if self.quake360_token else '✗'}")
+        
+        # 检查FOFA认证方式
+        if self.fofa_api_key:
+            print("  → FOFA 将使用API密钥")
+        else:
+            print("  → FOFA 将使用Cookie认证")
+            
+        # Quake360使用Token认证
+        print("  → Quake360 将使用 Token 认证")
     
     def _create_directories(self):
         """创建必要的目录"""
@@ -180,23 +205,132 @@ class IPTVSpeedTest:
         
         return session
     
-    def search_fofa_ips(self):
-        """从 FOFA 搜索 IP - 使用登录cookie"""
-        print("===============从 FOFA 检索 IP+端口 (使用Cookie认证)=================")
+    def search_fofa_api(self, query):
+        """使用FOFA API搜索IP"""
+        print("===============从 FOFA API 检索 IP+端口===============")
         
-        # 根据运营商类型构建不同的搜索查询
-        if self.isp.lower() == 'mobile':
-            query = f'"udpxy" && country="CN" && region="{self.region}" && org="{self.region} {self.isp} Communication Company Limited" && protocol="http"'
-        elif self.isp.lower() == 'telecom':
-            query = f'"udpxy" && country="CN" && region="{self.region}" && org="Chinanet" && protocol="http"'
-        elif self.isp.lower() == 'unicom':
-            query = f'"udpxy" && country="CN" && region="{self.region}" && org="CHINA UNICOM China169 Backbone" && protocol="http"'
-        else:
-            # 默认使用原来的格式
-            query = f'"udpxy" && country="CN" && region="{self.region}" && org="{self.region} {self.isp} Communication Company Limited" && protocol="http"'
+        # 使用base64编码查询
+        query_b64 = base64.b64encode(query.encode()).decode().replace('\n', '')
+        
+        print(f"搜索查询: {query}")
+        
+        # 构建API请求URL
+        api_url = "https://fofa.info/api/v1/search/all"
+        params = {
+            'key': self.fofa_api_key,
+            'qbase64': query_b64,
+            'fields': 'ip,port,host',  # 指定返回字段
+            'size': 10,  # 每页数量
+            'page': 1,    # 页码
+            'full': 'false'  # 搜索一年内数据
+        }
+        
+        print(f"FOFA API URL: {api_url}")
+        print(f"查询参数: key={self.fofa_api_key[:10]}..., size={params['size']}, page={params['page']}")
+        
+        try:
+            # 创建session
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': self.fofa_user_agent,
+                'Accept': 'application/json'
+            })
+            
+            print("发送FOFA API请求...")
+            response = session.get(api_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            print(f"响应状态码: {response.status_code}")
+            
+            # 解析JSON响应
+            try:
+                response_json = response.json()
+                
+                # 检查API响应错误
+                if response_json.get('error', False):
+                    error_msg = response_json.get('errmsg', '未知错误')
+                    print(f"FOFA API错误: {error_msg}")
+                    return []
+                
+                # 获取结果数据
+                results = response_json.get('results', [])
+                size = response_json.get('size', 0)
+                
+                print(f"API返回总数据量: {size}")
+                print(f"当前页结果数: {len(results)}")
+                
+                # 提取IP:PORT组合
+                ip_ports = []
+                for result in results:
+                    if len(result) >= 2:  # 确保有IP和端口数据
+                        # FOFA API返回格式通常是：[ip, port, host] 的顺序
+                        ip = result[0] if len(result) > 0 else None
+                        port = result[1] if len(result) > 1 else None
+                        
+                        # 处理IP和端口
+                        if ip and port:
+                            # 清理IP地址（移除协议前缀）
+                            ip = str(ip)
+                            if ip.startswith('http://'):
+                                ip = ip[7:]
+                            elif ip.startswith('https://'):
+                                ip = ip[8:]
+                            
+                            # 如果IP包含端口，提取IP部分
+                            if ':' in ip:
+                                ip = ip.split(':')[0]
+                            
+                            # 验证IP格式
+                            if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+                                ip_port = f"{ip}:{port}"
+                                ip_ports.append(ip_port)
+                                
+                print(f"调试信息: 处理了 {len(results)} 个原始结果")
+                if results:
+                    print("前3个原始结果:")
+                    for i, result in enumerate(results[:3]):
+                        print(f"  结果 {i+1}: {result} (长度: {len(result)})")
+                print(f"成功提取 {len(ip_ports)} 个IP:PORT")
+                
+                # 去重
+                unique_ips = list(set(ip_ports))
+                
+                if unique_ips:
+                    print(f"FOFA API搜索成功，总共找到 {len(unique_ips)} 个唯一 IP")
+                    print("前10个IP:")
+                    for ip in unique_ips[:10]:
+                        print(f"  {ip}")
+                    if len(unique_ips) > 10:
+                        print(f"... 还有 {len(unique_ips) - 10} 个")
+                    return unique_ips
+                else:
+                    print("FOFA API搜索未找到任何有效IP")
+                    # 输出原始数据结构用于调试
+                    if results:
+                        print("原始数据结构示例:")
+                        for i, result in enumerate(results[:3]):
+                            print(f"  结果 {i+1}: {result}")
+                    return []
+                    
+            except json.JSONDecodeError as e:
+                print(f"JSON解析失败: {e}")
+                print("响应内容片段 (前500字符):")
+                print(response.text[:500])
+                return []
+                
+        except requests.exceptions.RequestException as e:
+            print(f"FOFA API请求失败: {e}")
+            return []
+        except Exception as e:
+            print(f"FOFA API搜索异常: {e}")
+            return []
+    
+    def search_fofa_cookie(self, query):
+        """使用FOFA Cookie搜索IP"""
+        print("===============从 FOFA 检索 IP+端口 (使用Cookie认证)===============")
         
         query_b64 = base64.b64encode(query.encode()).decode().replace('\n', '')
-        fofa_url = f"https://fofa.info/result?qbase64={query_b64}&page=1&page_size=100"
+        fofa_url = f"https://fofa.info/result?qbase64={query_b64}&page=1&page_size=10"
         
         print(f"搜索查询: {query}")
         print(f"FOFA URL: {fofa_url}")
@@ -220,7 +354,7 @@ class IPTVSpeedTest:
                 print("检测到需要登录 - 请检查Cookie是否有效")
                 return []
             
-            # 方法1：使用shell脚本的第一种方式 - 匹配行首的IP:PORT格式
+            # 方法1：使用第一种方式 - 匹配行首的IP:PORT格式
             line_pattern = r'^\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)\s*$'
             lines = response.text.split('\n')
             method1_ips = []
@@ -232,7 +366,7 @@ class IPTVSpeedTest:
             
             print(f"方法1 (行首匹配): 找到 {len(method1_ips)} 个IP")
             
-            # 方法2：使用shell脚本的第二种方式 - 全文匹配IP:PORT
+            # 方法2：使用第二种方式 - 全文匹配IP:PORT
             ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b'
             method2_ips = re.findall(ip_pattern, response.text)
             
@@ -264,18 +398,78 @@ class IPTVSpeedTest:
             print(f"FOFA搜索异常: {e}")
             return []
     
+    def search_fofa_ips(self):
+        """从 FOFA 搜索 IP - 优先使用API，回退到Cookie"""
+        # 根据运营商类型构建搜索查询（简化为单个查询）
+        if self.isp.lower() == 'mobile':
+            query = f'"udpxy" && country="CN" && region="{self.region}" && (org="{self.region} Mobile Communication Company Limited" || org="{self.region} Mobile Communications Co." || org="China Mobile Communicaitons Corporation" || org="China Mobile Group {self.region} communications corporation" || org="China Mobile Group {self.region} Co.") && protocol="http"'
+        elif self.isp.lower() == 'telecom':
+            query = f'"udpxy" && country="CN" && region="{self.region}" && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group" || org="{self.region} Telecom" || org="CHINANET {self.region} province network" || org="CHINANET {self.region} province backbone") && protocol="http"'
+        elif self.isp.lower() == 'unicom':
+            query = f'"udpxy" && country="CN" && region="{self.region}" && (org="CHINA UNICOM China169 Backbone" || org="China Unicom" || org="China Unicom IP network" || org="CHINA UNICOM Industrial Internet Backbone" || org="China Unicom {self.region} network" || org="China Unicom {self.region} IP network" || org="China Unicom {self.region} Province Network" || org="UNICOM {self.region} province network" || org="China Unicom IP network China169 {self.region} province") && protocol="http"'
+        else:
+            # 默认查询
+            query = f'"udpxy" && country="CN" && region="{self.region}" && protocol="http"'
+        
+        print(f"使用FOFA查询")
+        
+        # 优先使用API方式，如果失败则回退到Cookie方式
+        if self.fofa_api_key:
+            print("使用API方式进行查询")
+            api_results = self.search_fofa_api(query)
+            if api_results:
+                print(f"FOFA API找到 {len(api_results)} 个IP")
+                return api_results
+            else:
+                print("API方式失败，尝试Cookie方式")
+                cookie_results = self.search_fofa_cookie(query)
+                if cookie_results:
+                    print(f"FOFA Cookie找到 {len(cookie_results)} 个IP")
+                    return cookie_results
+        else:
+            print("使用Cookie方式进行查询")
+            cookie_results = self.search_fofa_cookie(query)
+            if cookie_results:
+                print(f"FOFA Cookie找到 {len(cookie_results)} 个IP")
+                return cookie_results
+        
+        print("FOFA搜索未找到任何IP")
+        return []
+    
     def search_quake360_ips(self):
-        """从 Quake360 搜索 IP"""
+        """从 Quake360 搜索 IP - 使用Token认证"""
         print(f"===============从 Quake360 检索 IP ({self.region})=================")
         
-        # 构建搜索查询
+        if not self.quake360_token:
+            print("❌ 未配置QUAKE360_TOKEN，跳过Quake360搜索")
+            return []
+        
+        print("🔑 使用 Quake360 Token 方式搜索")
+        return self.search_quake360_api()
+    
+    def search_quake360_api(self):
+        """从 Quake360 搜索 IP - API方式"""
+        print("--- Quake360 API 搜索 ---")
+        
+        # 根据运营商类型构建搜索查询
+        if self.isp.lower() == 'telecom':
+            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND isp: "中国电信" AND protocol: "http"'
+        elif self.isp.lower() == 'unicom':
+            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND isp: "中国联通" AND protocol: "http"'
+        elif self.isp.lower() == 'mobile':
+            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND isp: "中国移动" AND protocol: "http"'
+        else:
+            # 默认查询
+            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND protocol: "http"'
+        
+        print(f"查询参数: {query}")
+        
         query_data = {
-            "query": f'"udpxy" AND country: "CN" AND province: "{self.region}" AND org: "China {self.isp}" AND protocol: "http"',
+            "query": query,
             "start": 0,
-            "size": 100,
-            "ignore_cache": "False",
-            "latest": "True",
-            "shortcuts": "635fcb52cc57190bd8826d09"
+            "size": 10,  
+            "ignore_cache": False,
+            "latest": True
         }
         
         headers = {
@@ -283,8 +477,6 @@ class IPTVSpeedTest:
             'Content-Type': 'application/json',
             'User-Agent': self.fofa_user_agent
         }
-        
-        print(f"查询参数: {query_data['query']}")
         
         try:
             response = requests.post(
@@ -301,32 +493,50 @@ class IPTVSpeedTest:
             try:
                 response_json = response.json()
                 
+                # 检查API错误
+                code = response_json.get('code')
+                if code and str(code) not in ['0', '200', 'success']:
+                    error_message = response_json.get('message', '未知错误')
+                    print(f"Quake360 API错误: {code} - {error_message}")
+                    return []
+                
                 # 从JSON结构中提取IP和端口
-                ips_from_json = []
+                all_ips = []
                 if 'data' in response_json and isinstance(response_json['data'], list):
-                    print(f"找到 {len(response_json['data'])} 个数据项")
+                    data_count = len(response_json['data'])
+                    print(f"找到 {data_count} 个数据项")
                     
                     for item in response_json['data']:
                         if isinstance(item, dict):
-                            # 提取IP地址
-                            ip = item.get('ip') or item.get('host') or item.get('address')
+                            # 提取IP地址 - 尝试多个可能的字段名
+                            ip = (item.get('ip') or 
+                                  item.get('host') or 
+                                  item.get('address') or
+                                  item.get('target') or
+                                  item.get('service', {}).get('ip') if isinstance(item.get('service'), dict) else None)
                             
-                            # 提取端口
-                            port = item.get('port') or item.get('service_port') or item.get('target_port')
+                            # 提取端口 - 尝试多个可能的字段名
+                            port = (item.get('port') or 
+                                   item.get('service_port') or 
+                                   item.get('target_port') or
+                                   item.get('service', {}).get('port') if isinstance(item.get('service'), dict) else None)
                             
                             # 组合IP:PORT
                             if ip and port:
                                 # 确保IP是有效的IP地址格式（不包含域名）
                                 if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
                                     ip_port = f"{ip}:{port}"
-                                    ips_from_json.append(ip_port)
+                                    all_ips.append(ip_port)
+                else:
+                    print("API响应中未找到有效数据结构")
+                    print(f"响应结构: {list(response_json.keys()) if isinstance(response_json, dict) else 'non-dict'}")
+                    return []
                 
-                # 去重
-                unique_ips = list(set(ips_from_json))
-                
-                print(f"从JSON结构提取到 {len(unique_ips)} 个唯一IP:PORT")
+                # 去重结果
+                unique_ips = list(set(all_ips))
                 
                 if unique_ips:
+                    print(f"Quake360 API搜索成功: 总共找到 {len(unique_ips)} 个唯一IP")
                     # 显示前10个IP
                     print("提取到的IP地址:")
                     for ip in unique_ips[:10]:
@@ -334,50 +544,25 @@ class IPTVSpeedTest:
                     if len(unique_ips) > 10:
                         print(f"  ... 还有 {len(unique_ips) - 10} 个")
                     
-                    print(f"Quake360 搜索结果: {len(unique_ips)} 个 IP")
                     return unique_ips
                 else:
-                    print("未从JSON中提取到有效的IP地址")
+                    print("Quake360 API未找到有效的IP地址")
                     return []
                     
             except json.JSONDecodeError as e:
                 print(f"JSON解析失败: {e}")
-                # 回退到正则表达式方法
-                print("尝试使用正则表达式提取...")
-                
-                # 使用与shell脚本相同的正则表达式
-                ip_pattern = r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}_[0-9]{1,5}'
-                ips_with_underscore = re.findall(ip_pattern, response.text)
-                
-                print(f"使用正则表达式找到 {len(ips_with_underscore)} 个IP_PORT格式的匹配")
-                
-                if ips_with_underscore:
-                    # 显示找到的原始格式
-                    print("找到的IP_PORT格式:")
-                    for ip in ips_with_underscore[:10]:
-                        print(f"  {ip}")
-                    if len(ips_with_underscore) > 10:
-                        print(f"  ... 还有 {len(ips_with_underscore) - 10} 个")
-                    
-                    # 转换格式：IP_PORT -> IP:PORT
-                    converted_ips = [ip.replace('_', ':') for ip in ips_with_underscore]
-                    
-                    print(f"转换为IP:PORT格式后:")
-                    for ip in converted_ips[:10]:
-                        print(f"  {ip}")
-                    if len(converted_ips) > 10:
-                        print(f"  ... 还有 {len(converted_ips) - 10} 个")
-                    
-                    print(f"正则表达式方法找到 {len(converted_ips)} 个IP")
-                    return converted_ips
-                else:
-                    print("正则表达式方法也未找到IP")
-                    return []
+                print("响应内容片段:")
+                print(response.text[:500])
+                return []
             
+        except requests.exceptions.RequestException as e:
+            print(f"Quake360 API请求失败: {e}")
+            return []
         except Exception as e:
-            print(f"Quake360 搜索失败: {e}")
+            print(f"Quake360 API搜索异常: {e}")
             return []
     
+        
     def test_port_connectivity(self, ip_port, timeout=2):
         """测试端口连通性"""
         try:
