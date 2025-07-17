@@ -1,3 +1,12 @@
 city file stream
 Shanghai Shanghai udp/233.18.204.57:5140  
 Hebei Hebei udp/239.254.200.45:8008
+Shanxi Shanxi udp/239.1.1.7:8007
+Jiangsu Jiangsu udp/239.49.8.19:9614
+Gansu Gansu udp/239.255.30.101:8231
+Sichuan Sichuan udp/239.93.0.184:5140
+Hubei Hubei udp/239.254.96.115:8664
+Shandong Shandong udp/239.21.1.120:5002
+Guangdong Guangdong udp/239.77.1.17:5146
+Zhejiang Zhejiang udp/233.50.201.118:5140
+Hunan Hunan udp/239.76.253.151:9000
