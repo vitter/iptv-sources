@@ -584,7 +584,7 @@ class IPTVSourceCollector:
         
         # 搜索查询
         fofa_query = 'title="jsmpeg-streamer" && country="CN"'
-        quake360_query = 'response:"jsmpeg-streamer" AND country:"China"'
+        quake360_query = 'title:"jsmpeg-streamer" AND country:"China"'
         
         # 从搜索引擎获取新数据
         new_data = self.search_both_engines(fofa_query, quake360_query)
@@ -607,7 +607,7 @@ class IPTVSourceCollector:
         
         # 搜索查询
         fofa_query = 'body="/iptv/live/zh_cn.js" && country="CN"'
-        quake360_query = 'response:"/iptv/live/zh_cn.js" AND country:"China"'
+        quake360_query = 'body:"/iptv/live/zh_cn.js" AND country:"China"'
         
         # 从搜索引擎获取新数据
         new_data = self.search_both_engines(fofa_query, quake360_query)
@@ -630,7 +630,7 @@ class IPTVSourceCollector:
         
         # 搜索查询
         fofa_query = 'body="ZHGXTV" && country="CN"'
-        quake360_query = 'response:"ZHGXTV" AND country:"China"'
+        quake360_query = 'body:"ZHGXTV" AND country:"China"'
         
         # 从搜索引擎获取新数据
         new_data = self.search_both_engines(fofa_query, quake360_query)
