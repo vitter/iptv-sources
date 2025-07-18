@@ -10,11 +10,13 @@
 - **FOFA搜索引擎**: 支持API密钥和Cookie两种认证方式，API优先，失败时自动回退到Cookie
 - **Quake360搜索引擎**: 使用Token认证的API接口
 - **智能查询构建**: 根据不同运营商（电信/联通/移动）自动构建最优搜索条件
+- **多页数据获取**: 支持翻页获取更多数据，可配置最大页数限制（默认10页）
 - **结果合并去重**: 自动合并多个搜索源的结果并去除重复项
 
 ### 🌐 连通性检测
 - **端口可达性测试**: 并发测试IP端口的连通状态（2秒超时）
 - **udpxy服务验证**: 通过HTTP请求验证目标服务器是否为有效的udpxy代理服务（5秒超时）
+- **状态信息获取**: 获取udpxy服务器的活跃连接数和状态详情
 - **服务识别**: 智能识别udpxy服务的多种响应模式和版本标识
 - **并发测试**: 支持最大30个线程并发测试，大幅提高检测效率
 
@@ -101,8 +103,13 @@ Hebei Hebei_333 udp/239.253.92.83:8012
 
 ### 基本语法
 ```bash
-python speedtest_integrated_new.py <省市> <运营商>
+python speedtest_integrated_new.py <省市> <运营商> [--max-pages 页数]
 ```
+
+### 命令行参数
+- **省市**: 目标搜索的省份或城市名称
+- **运营商**: 目标运营商类型（Telecom/Unicom/Mobile）
+- **--max-pages**: 可选参数，指定最大翻页数限制（默认10页，防止数据量过大）
 
 ### 支持的运营商
 - `Telecom` - 中国电信
@@ -112,51 +119,84 @@ python speedtest_integrated_new.py <省市> <运营商>
 ### 使用示例
 
 ```bash
-# 测试河北联通（实际测试案例）
-python speedtest_integrated_new.py Hebei Unicom
+# 基础测试（默认10页限制）
+python speedtest_integrated_new.py Hebei Telecom
 
-# 测试上海电信
-python speedtest_integrated_new.py Shanghai Telecom
+# 指定翻页数限制（获取更多数据）
+python speedtest_integrated_new.py Hebei Telecom --max-pages 5
 
-# 测试北京联通
-python speedtest_integrated_new.py Beijing Unicom
-
-# 测试广州移动
-python speedtest_integrated_new.py Guangzhou Mobile
+# 测试不同地区和运营商
+python speedtest_integrated_new.py Shanghai Telecom --max-pages 3
+python speedtest_integrated_new.py Beijing Unicom --max-pages 8
+python speedtest_integrated_new.py Guangzhou Mobile --max-pages 1
 ```
+
+### 翻页参数说明
+- **默认值**: 10页（平衡数据量和处理时间）
+- **建议范围**: 1-20页（超过20页可能导致处理时间过长）
+- **安全限制**: 程序会在超过50页时警告并询问是否继续
+- **页面大小**: FOFA API每页10条，Cookie方式每页10条，Quake360每页10条
 
 ### 运行输出示例
 
 ```
+配置信息:
+  地区: hebei
+  运营商: telecom
+  最大翻页数: 3
+
 ✓ 配置验证通过
 配置状态:
   FOFA Cookie: ✓
   Quake360 Token: ✓
-  → FOFA 将使用API密钥
+  → FOFA 将使用Cookie认证
   → Quake360 将使用 Token 认证
 
-开始为 Hebei Unicom 搜索和测试 IP
-城市: Hebei_333, 流地址: udp/239.253.92.83:8012
+开始为 Hebei Telecom 搜索和测试 IP
+城市: Hebei, 流地址: udp/239.254.200.45:8008
 
-===============从 FOFA API 检索 IP+端口===============
-FOFA API搜索成功，总共找到 10 个唯一 IP
+===============从 FOFA 检索 IP+端口 (使用Cookie认证)===============
+搜索查询: "udpxy" && country="CN" && region="Hebei" && ...
+最大翻页数限制: 3 页
+发送第一次请求获取总数据量...
+从连续赋值提取到总数: 503 (变量: aC)
+从变量提取到页面大小: 10 (模式: aC\.size\s*=\s*(\d+))
+总数据量: 503
+总页数: 51, 实际获取页数: 3
+第1页提取到 60 个IP
+正在获取第 2/3 页数据...
+第2页提取到 45 个IP
+正在获取第 3/3 页数据...
+第3页提取到 38 个IP
+FOFA Cookie总共提取到 143 个IP:PORT
+去重后共 10 个唯一IP
 
 ===============从 Quake360 检索 IP (Hebei)=================
-Quake360 API搜索成功: 总共找到 10 个唯一IP
+🔑 使用 Quake360 Token 方式搜索
+--- Quake360 API 搜索 ---
+Quake360 API错误: q5000 - 内部服务器发生错误
+  这是Quake360服务器内部错误，可能是临时问题，建议稍后重试
 
-从FOFA和Quake360总共找到 18 个唯一 IP
-============IP端口检测，测试 18 个 IP==============
-===============检索完成，找到 9 个可访问 IP，9 个udpxy服务===============
+从FOFA和Quake360总共找到 10 个唯一 IP
+============IP端口检测，测试 10 个 IP==============
+端口可达: 111.224.100.146:8444
+  ✓ udpxy服务: 111.224.100.146:8444 (活跃连接: 0, 地址: 192.168.1.2)
+端口可达: 106.116.241.38:9999
+  ✓ udpxy服务: 106.116.241.38:9999 (活跃连接: 0, 地址: 10.114.147.185)
+===============检索完成，找到 4 个可访问 IP，4 个udpxy服务===============
 
 ==========开始流媒体测速=================
+1/4 测试udpxy服务: 106.116.241.38:9999
+  测试流媒体: http://106.116.241.38:9999/udp/239.254.200.45:8008
+  ✓ 106.116.241.38:9999 下载完成:
+    总大小: 2048.0KB
+    总耗时: 2.01秒
+    平均速度: 0.996MB/s
 ==========流媒体测速完成=================
-总计: 8 个可用IP, 1 个失败
+总计: 1 个可用IP, 3 个失败
 
 ======本次Hebei组播IP搜索结果=============
-1.001 MB/s  221.194.78.228:2222
-0.997 MB/s  110.255.26.128:8088
-0.987 MB/s  121.20.197.192:9999
-...
+0.996 MB/s  106.116.241.38:9999
 ```
 
 ## 输出文件说明

@@ -28,6 +28,7 @@ python speedtest_integrated_new.py <省市> <运营商>
 import argparse
 import base64
 import json
+import math  # 新增：用于翻页计算
 import os
 import re
 import socket
@@ -41,16 +42,25 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 
+# 可选导入 BeautifulSoup，如果不可用则使用备用解析方法
+try:
+    from bs4 import BeautifulSoup
+    BEAUTIFULSOUP_AVAILABLE = True
+except ImportError:
+    BEAUTIFULSOUP_AVAILABLE = False
+    print("Warning: BeautifulSoup not available, will use regex parsing for udpxy status")
+
 
 class IPTVSpeedTest:
     """IPTV 测速主类"""
     
-    def __init__(self, region, isp):
+    def __init__(self, region, isp, max_pages=10):
         # 加载环境变量
         load_dotenv()
         
         self.region = self._format_string(region)
         self.isp = self._format_string(isp)
+        self.max_pages = max_pages  # 新增：最大翻页数限制
         
         # 从环境变量读取配置并清理格式
         self.quake360_token = os.getenv('QUAKE360_TOKEN')
@@ -206,27 +216,18 @@ class IPTVSpeedTest:
         return session
     
     def search_fofa_api(self, query):
-        """使用FOFA API搜索IP"""
+        """使用FOFA API搜索IP - 支持翻页获取多页数据"""
         print("===============从 FOFA API 检索 IP+端口===============")
         
         # 使用base64编码查询
         query_b64 = base64.b64encode(query.encode()).decode().replace('\n', '')
         
         print(f"搜索查询: {query}")
+        print(f"最大翻页数限制: {self.max_pages} 页")
         
         # 构建API请求URL
         api_url = "https://fofa.info/api/v1/search/all"
-        params = {
-            'key': self.fofa_api_key,
-            'qbase64': query_b64,
-            'fields': 'ip,port,host',  # 指定返回字段
-            'size': 10,  # 每页数量
-            'page': 1,    # 页码
-            'full': 'false'  # 搜索一年内数据
-        }
-        
-        print(f"FOFA API URL: {api_url}")
-        print(f"查询参数: key={self.fofa_api_key[:10]}..., size={params['size']}, page={params['page']}")
+        all_ip_ports = []
         
         try:
             # 创建session
@@ -236,88 +237,111 @@ class IPTVSpeedTest:
                 'Accept': 'application/json'
             })
             
-            print("发送FOFA API请求...")
+            # 第一次请求，获取总数据量
+            params = {
+                'key': self.fofa_api_key,
+                'qbase64': query_b64,
+                'fields': 'ip,port,host',  # 指定返回字段
+                'size': 10,  # 每页数量
+                'page': 1,    # 页码
+                'full': 'false'  # 搜索一年内数据
+            }
+            
+            print(f"FOFA API URL: {api_url}")
+            print(f"查询参数: key={self.fofa_api_key[:10]}..., size={params['size']}")
+            
+            print("发送第一次请求获取总数据量...")
+            time.sleep(1)  # 添加延迟避免API限流
+            
             response = session.get(api_url, params=params, timeout=30)
             response.raise_for_status()
             
             print(f"响应状态码: {response.status_code}")
             
             # 解析JSON响应
-            try:
-                response_json = response.json()
-                
-                # 检查API响应错误
-                if response_json.get('error', False):
-                    error_msg = response_json.get('errmsg', '未知错误')
-                    print(f"FOFA API错误: {error_msg}")
-                    return []
-                
-                # 获取结果数据
-                results = response_json.get('results', [])
-                size = response_json.get('size', 0)
-                
-                print(f"API返回总数据量: {size}")
-                print(f"当前页结果数: {len(results)}")
-                
-                # 提取IP:PORT组合
-                ip_ports = []
-                for result in results:
-                    if len(result) >= 2:  # 确保有IP和端口数据
-                        # FOFA API返回格式通常是：[ip, port, host] 的顺序
-                        ip = result[0] if len(result) > 0 else None
-                        port = result[1] if len(result) > 1 else None
-                        
-                        # 处理IP和端口
-                        if ip and port:
-                            # 清理IP地址（移除协议前缀）
-                            ip = str(ip)
-                            if ip.startswith('http://'):
-                                ip = ip[7:]
-                            elif ip.startswith('https://'):
-                                ip = ip[8:]
-                            
-                            # 如果IP包含端口，提取IP部分
-                            if ':' in ip:
-                                ip = ip.split(':')[0]
-                            
-                            # 验证IP格式
-                            if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
-                                ip_port = f"{ip}:{port}"
-                                ip_ports.append(ip_port)
-                                
-                print(f"调试信息: 处理了 {len(results)} 个原始结果")
-                if results:
-                    print("前3个原始结果:")
-                    for i, result in enumerate(results[:3]):
-                        print(f"  结果 {i+1}: {result} (长度: {len(result)})")
-                print(f"成功提取 {len(ip_ports)} 个IP:PORT")
-                
-                # 去重
-                unique_ips = list(set(ip_ports))
-                
-                if unique_ips:
-                    print(f"FOFA API搜索成功，总共找到 {len(unique_ips)} 个唯一 IP")
-                    print("前10个IP:")
-                    for ip in unique_ips[:10]:
-                        print(f"  {ip}")
-                    if len(unique_ips) > 10:
-                        print(f"... 还有 {len(unique_ips) - 10} 个")
-                    return unique_ips
-                else:
-                    print("FOFA API搜索未找到任何有效IP")
-                    # 输出原始数据结构用于调试
-                    if results:
-                        print("原始数据结构示例:")
-                        for i, result in enumerate(results[:3]):
-                            print(f"  结果 {i+1}: {result}")
-                    return []
+            response_json = response.json()
+            
+            # 检查API响应错误
+            if response_json.get('error', False):
+                error_msg = response_json.get('errmsg', '未知错误')
+                print(f"FOFA API错误: {error_msg}")
+                return []
+            
+            # 获取结果数据
+            total_size = response_json.get('size', 0)
+            current_page = response_json.get('page', 1)
+            results = response_json.get('results', [])
+            
+            print(f"API返回总数据量: {total_size}")
+            print(f"当前页: {current_page}, 当前页结果数: {len(results)}")
+            
+            # 计算总页数
+            page_size = 10
+            total_pages = (total_size + page_size - 1) // page_size  # 向上取整
+            
+            # 应用最大页数限制
+            actual_pages = min(total_pages, self.max_pages)
+            print(f"总页数: {total_pages}, 实际获取页数: {actual_pages}")
+            
+            # 处理第一页数据
+            page_ip_ports = self._extract_fofa_api_results(results)
+            all_ip_ports.extend(page_ip_ports)
+            print(f"第1页提取到 {len(page_ip_ports)} 个IP:PORT")
+            
+            # 如果有多页，继续获取其他页的数据
+            if actual_pages > 1:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
                     
-            except json.JSONDecodeError as e:
-                print(f"JSON解析失败: {e}")
-                print("响应内容片段 (前500字符):")
-                print(response.text[:500])
+                    # 更新页码参数
+                    params['page'] = page
+                    
+                    # 添加延迟避免API限流
+                    time.sleep(1)
+                    
+                    try:
+                        response = session.get(api_url, params=params, timeout=30)
+                        response.raise_for_status()
+                        
+                        response_json = response.json()
+                        
+                        if response_json.get('error', False):
+                            error_msg = response_json.get('errmsg', '未知错误')
+                            print(f"第{page}页FOFA API错误: {error_msg}")
+                            continue
+                        
+                        results = response_json.get('results', [])
+                        page_ip_ports = self._extract_fofa_api_results(results)
+                        all_ip_ports.extend(page_ip_ports)
+                        print(f"第{page}页提取到 {len(page_ip_ports)} 个IP:PORT")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
+            
+            # 去重
+            unique_ips = list(set(all_ip_ports))
+            
+            print(f"FOFA API总共提取到 {len(all_ip_ports)} 个IP:PORT")
+            print(f"去重后共 {len(unique_ips)} 个唯一IP")
+            
+            if unique_ips:
+                print("前10个IP:")
+                for ip in unique_ips[:10]:
+                    print(f"  {ip}")
+                if len(unique_ips) > 10:
+                    print(f"... 还有 {len(unique_ips) - 10} 个")
+                return unique_ips
+            else:
+                print("FOFA API搜索未找到任何有效IP")
                 return []
                 
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_ip_ports)} 个结果")
+            return list(set(all_ip_ports))  # 返回已获取的去重结果
         except requests.exceptions.RequestException as e:
             print(f"FOFA API请求失败: {e}")
             return []
@@ -325,20 +349,56 @@ class IPTVSpeedTest:
             print(f"FOFA API搜索异常: {e}")
             return []
     
+    def _extract_fofa_api_results(self, results):
+        """提取FOFA API搜索结果数据"""
+        ip_ports = []
+        
+        for result in results:
+            if len(result) >= 2:  # 确保有IP和端口数据
+                # FOFA API返回格式通常是：[ip, port, host] 的顺序
+                ip = result[0] if len(result) > 0 else None
+                port = result[1] if len(result) > 1 else None
+                
+                # 处理IP和端口
+                if ip and port:
+                    # 清理IP地址（移除协议前缀）
+                    ip = str(ip)
+                    if ip.startswith('http://'):
+                        ip = ip[7:]
+                    elif ip.startswith('https://'):
+                        ip = ip[8:]
+                    
+                    # 如果IP包含端口，提取IP部分
+                    if ':' in ip:
+                        ip = ip.split(':')[0]
+                    
+                    # 验证IP格式
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+                        ip_port = f"{ip}:{port}"
+                        ip_ports.append(ip_port)
+        
+        return ip_ports
+    
     def search_fofa_cookie(self, query):
-        """使用FOFA Cookie搜索IP"""
+        """使用FOFA Cookie搜索IP - 支持翻页获取多页数据"""
         print("===============从 FOFA 检索 IP+端口 (使用Cookie认证)===============")
         
         query_b64 = base64.b64encode(query.encode()).decode().replace('\n', '')
-        fofa_url = f"https://fofa.info/result?qbase64={query_b64}&page=1&page_size=10"
         
         print(f"搜索查询: {query}")
-        print(f"FOFA URL: {fofa_url}")
+        print(f"最大翻页数限制: {self.max_pages} 页")
+        
+        all_ip_ports = []
         
         try:
             session = self._create_session_with_retry()
-            print("发送FOFA请求...")
-            response = session.get(fofa_url, timeout=30)
+            
+            # 第一次请求，获取总数据量和页面信息
+            first_url = f"https://fofa.info/result?qbase64={query_b64}&page=1&page_size=10"
+            print(f"FOFA URL: {first_url}")
+            
+            print("发送第一次请求获取总数据量...")
+            response = session.get(first_url, timeout=30)
             response.raise_for_status()
             
             print(f"响应状态码: {response.status_code}")
@@ -354,30 +414,64 @@ class IPTVSpeedTest:
                 print("检测到需要登录 - 请检查Cookie是否有效")
                 return []
             
-            # 方法1：使用第一种方式 - 匹配行首的IP:PORT格式
-            line_pattern = r'^\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)\s*$'
-            lines = response.text.split('\n')
-            method1_ips = []
+            # 提取页面信息
+            total_count, page_size = self._extract_fofa_page_info(response.text)
+            print(f"总数据量: {total_count}")
+            print(f"页面大小: {page_size}")
             
-            for line in lines:
-                match = re.match(line_pattern, line)
-                if match:
-                    method1_ips.append(match.group(1))
+            # 计算总页数
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1  # 向上取整
             
-            print(f"方法1 (行首匹配): 找到 {len(method1_ips)} 个IP")
+            # 应用最大页数限制
+            actual_pages = min(total_pages, self.max_pages)
+            print(f"总页数: {total_pages}, 实际获取页数: {actual_pages}")
             
-            # 方法2：使用第二种方式 - 全文匹配IP:PORT
-            ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b'
-            method2_ips = re.findall(ip_pattern, response.text)
+            # 处理第一页数据
+            first_page_ips = self._extract_fofa_cookie_results(response.text)
+            all_ip_ports.extend(first_page_ips)
+            print(f"第1页提取到 {len(first_page_ips)} 个IP")
             
-            print(f"方法2 (全文匹配): 找到 {len(method2_ips)} 个IP")
+            # 如果有多页，继续获取其他页的数据
+            if actual_pages > 1:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
+                    
+                    page_url = f"https://fofa.info/result?qbase64={query_b64}&page={page}&page_size={page_size}"
+                    
+                    # 添加延迟避免被限流
+                    time.sleep(2)
+                    
+                    try:
+                        response = session.get(page_url, timeout=30)
+                        response.raise_for_status()
+                        
+                        # 检查响应是否有效
+                        if '[-3000]' in response.text:
+                            print(f"第{page}页被拒绝访问 [-3000]")
+                            continue
+                        
+                        if 'login' in response.url.lower() or '登录' in response.text:
+                            print(f"第{page}页需要重新登录")
+                            break
+                        
+                        page_ips = self._extract_fofa_cookie_results(response.text)
+                        all_ip_ports.extend(page_ips)
+                        print(f"第{page}页提取到 {len(page_ips)} 个IP")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
             
-            # 合并两种方法的结果
-            all_ips = method1_ips + method2_ips
-            unique_ips = list(set(all_ips))
+            # 去重结果
+            unique_ips = list(set(all_ip_ports))
+            
+            print(f"FOFA Cookie总共提取到 {len(all_ip_ports)} 个IP:PORT")
+            print(f"去重后共 {len(unique_ips)} 个唯一IP")
             
             if unique_ips:
-                print(f"FOFA搜索成功，总共找到 {len(unique_ips)} 个唯一 IP")
                 print("前10个IP:")
                 for ip in unique_ips[:10]:
                     print(f"  {ip}")
@@ -386,17 +480,168 @@ class IPTVSpeedTest:
                 return unique_ips
             else:
                 print("FOFA搜索未找到任何IP")
-                # 输出部分响应内容用于调试
-                print("响应内容片段 (前500字符):")
-                print(response.text[:500])
                 return []
                 
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_ip_ports)} 个结果")
+            return list(set(all_ip_ports))  # 返回已获取的去重结果
         except requests.exceptions.RequestException as e:
             print(f"FOFA请求失败: {e}")
             return []
         except Exception as e:
             print(f"FOFA搜索异常: {e}")
             return []
+    
+    def _extract_fofa_page_info(self, content):
+        """提取FOFA页面的总数量和页面大小信息"""
+        total_count = 0
+        page_size = 10
+        
+        try:
+            # 方法1: 尝试从JavaScript变量中提取总数
+            # 支持多种可能的变量名（bI, aC, 等混淆后的变量名）
+            total_patterns = [
+                r'bI\.total\s*=\s*(\d+)',     # 原始模式
+                r'aC\.total\s*=\s*(\d+)',     # 新发现的模式
+                r'[a-zA-Z]{1,3}\.total\s*=\s*(\d+)',  # 通用模式，匹配任意1-3个字母的变量名
+            ]
+            
+            for pattern in total_patterns:
+                total_match = re.search(pattern, content)
+                if total_match:
+                    total_count = int(total_match.group(1))
+                    print(f"从变量提取到总数: {total_count} (模式: {pattern})")
+                    break
+            
+            # 方法1.5: 专门处理连续赋值的情况，如 aC.size=10;aC.total=503
+            if total_count == 0:
+                # 查找连续赋值模式
+                continuous_pattern = r'([a-zA-Z]{1,4})\.(?:size|total)\s*=\s*\d+[;\s]*\1\.(?:size|total)\s*=\s*\d+'
+                continuous_match = re.search(continuous_pattern, content)
+                if continuous_match:
+                    var_name = continuous_match.group(1)
+                    # 提取这个变量的total值
+                    total_pattern = f'{var_name}\\.total\\s*=\\s*(\\d+)'
+                    total_match = re.search(total_pattern, content)
+                    if total_match:
+                        total_count = int(total_match.group(1))
+                        print(f"从连续赋值提取到总数: {total_count} (变量: {var_name})")
+            
+            # 方法2: 尝试从页面HTML中查找数据总数信息
+            if total_count == 0:
+                # 查找类似 "共xxx条数据" 的模式
+                count_patterns = [
+                    r'共\s*(\d+)\s*条',
+                    r'total:\s*(\d+)',
+                    r'count:\s*(\d+)',
+                    r'results:\s*(\d+)'
+                ]
+                
+                for pattern in count_patterns:
+                    match = re.search(pattern, content, re.IGNORECASE)
+                    if match:
+                        total_count = int(match.group(1))
+                        print(f"从页面内容提取到总数: {total_count}")
+                        break
+            
+            # 方法3: 如果还是没找到，根据实际提取的IP数量估算
+            if total_count == 0:
+                # 计算页面中实际的IP数量来估算
+                ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b'
+                found_ips = re.findall(ip_pattern, content)
+                if found_ips:
+                    actual_count = len(set(found_ips))  # 去重后的数量
+                    print(f"根据页面实际IP数量估算: 当前页有 {actual_count} 个IP")
+                    # 如果第一页就有较多IP，可能总数更多
+                    if actual_count >= 10:
+                        total_count = actual_count * 3  # 保守估计
+                        print(f"估算总数据量: {total_count}")
+            
+            # 调试：如果仍然无法提取数据，尝试查找所有可能的JavaScript变量赋值
+            if total_count == 0:
+                print("  [调试] 正在查找页面中的JavaScript变量...")
+                # 查找所有类似 xx.total = 数字 或 xx.size = 数字 的模式
+                debug_patterns = [
+                    r'([a-zA-Z]{1,4})\.total\s*=\s*(\d+)',
+                    r'([a-zA-Z]{1,4})\.size\s*=\s*(\d+)',
+                    r'total["\']?\s*:\s*(\d+)',
+                    r'size["\']?\s*:\s*(\d+)',
+                ]
+                
+                for pattern in debug_patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    if matches:
+                        for match in matches[:3]:  # 只显示前3个匹配
+                            if len(match) == 2:  # 变量名和值
+                                print(f"    发现变量: {match[0]}.total/size = {match[1]}")
+                            else:  # 只有值
+                                print(f"    发现值: {match}")
+            
+            # 查找页面大小的多种模式
+            size_patterns = [
+                r'bI\.size\s*=\s*(\d+)',      # 原始模式
+                r'aC\.size\s*=\s*(\d+)',      # 新发现的模式
+                r'[a-zA-Z]{1,3}\.size\s*=\s*(\d+)',   # 通用模式
+            ]
+            
+            for pattern in size_patterns:
+                size_match = re.search(pattern, content)
+                if size_match:
+                    extracted_page_size = int(size_match.group(1))
+                    print(f"从变量提取到页面大小: {extracted_page_size} (模式: {pattern})")
+                    if extracted_page_size != page_size:
+                        print(f"警告: 提取的页面大小({extracted_page_size})与预期({page_size})不符")
+                        if extracted_page_size > 0:
+                            page_size = extracted_page_size
+                    break
+            
+            # 如果仍未找到页面大小，尝试从总数提取中使用的同一变量名
+            if page_size == 10 and total_count > 0:  # 如果总数已找到但页面大小还是默认值
+                # 从前面成功的total提取中获取变量名
+                for pattern in total_patterns:
+                    total_match = re.search(pattern, content)
+                    if total_match:
+                        # 提取变量名部分
+                        var_match = re.match(r'([a-zA-Z]{1,3})\.', pattern)
+                        if var_match:
+                            var_name = var_match.group(1)
+                            size_pattern = f'{var_name}\\.size\\s*=\\s*(\\d+)'
+                            size_match = re.search(size_pattern, content)
+                            if size_match:
+                                extracted_page_size = int(size_match.group(1))
+                                print(f"从同变量提取到页面大小: {extracted_page_size} (变量: {var_name})")
+                                if extracted_page_size > 0:
+                                    page_size = extracted_page_size
+                                break
+                        break
+                        
+        except Exception as e:
+            print(f"提取页面信息失败: {e}")
+        
+        return total_count, page_size
+    
+    def _extract_fofa_cookie_results(self, content):
+        """提取FOFA Cookie搜索结果中的IP:PORT数据"""
+        all_ips = []
+        
+        # 方法1：使用第一种方式 - 匹配行首的IP:PORT格式
+        line_pattern = r'^\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)\s*$'
+        lines = content.split('\n')
+        method1_ips = []
+        
+        for line in lines:
+            match = re.match(line_pattern, line)
+            if match:
+                method1_ips.append(match.group(1))
+        
+        # 方法2：使用第二种方式 - 全文匹配IP:PORT
+        ip_pattern = r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+\b'
+        method2_ips = re.findall(ip_pattern, content)
+        
+        # 合并两种方法的结果
+        all_ips = method1_ips + method2_ips
+        
+        return all_ips
     
     def search_fofa_ips(self):
         """从 FOFA 搜索 IP - 优先使用API，回退到Cookie"""
@@ -448,28 +693,33 @@ class IPTVSpeedTest:
         return self.search_quake360_api()
     
     def search_quake360_api(self):
-        """从 Quake360 搜索 IP - API方式"""
+        """从 Quake360 搜索 IP - API方式，支持翻页获取多页数据"""
         print("--- Quake360 API 搜索 ---")
         
         # 根据运营商类型构建搜索查询
         if self.isp.lower() == 'telecom':
-            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND isp: "中国电信" AND protocol: "http"'
+            query = f'"udpxy" AND country: "China" AND province: "{self.region}" AND isp: "中国电信" AND protocol: "http"'
         elif self.isp.lower() == 'unicom':
-            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND isp: "中国联通" AND protocol: "http"'
+            query = f'"udpxy" AND country: "China" AND province: "{self.region}" AND isp: "中国联通" AND protocol: "http"'
         elif self.isp.lower() == 'mobile':
-            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND isp: "中国移动" AND protocol: "http"'
+            query = f'"udpxy" AND country: "China" AND province: "{self.region}" AND isp: "中国移动" AND protocol: "http"'
         else:
             # 默认查询
-            query = f'"udpxy" AND country: "CN" AND province: "{self.region}" AND protocol: "http"'
+            query = f'"udpxy" AND country: "China" AND province: "{self.region}" AND protocol: "http"'
         
         print(f"查询参数: {query}")
+        print(f"最大翻页数限制: {self.max_pages} 页")
         
+        all_ip_ports = []
+        
+        # 第一次请求，获取总数据量
         query_data = {
             "query": query,
             "start": 0,
-            "size": 10,  
+            "size": 10,  # 每页100条数据
             "ignore_cache": False,
-            "latest": True
+            "latest": True,
+            "shortcuts": "635fcb52cc57190bd8826d09"
         }
         
         headers = {
@@ -479,6 +729,10 @@ class IPTVSpeedTest:
         }
         
         try:
+            print("发送第一次请求获取总数据量...")
+            # 添加延迟避免API限流
+            time.sleep(2)
+            
             response = requests.post(
                 'https://quake.360.net/api/v3/search/quake_service',
                 headers=headers,
@@ -490,77 +744,140 @@ class IPTVSpeedTest:
             print(f"API响应状态码: {response.status_code}")
             
             # 解析JSON响应
-            try:
-                response_json = response.json()
-                
-                # 检查API错误
-                code = response_json.get('code')
-                if code and str(code) not in ['0', '200', 'success']:
-                    error_message = response_json.get('message', '未知错误')
-                    print(f"Quake360 API错误: {code} - {error_message}")
-                    return []
-                
-                # 从JSON结构中提取IP和端口
-                all_ips = []
-                if 'data' in response_json and isinstance(response_json['data'], list):
-                    data_count = len(response_json['data'])
-                    print(f"找到 {data_count} 个数据项")
-                    
-                    for item in response_json['data']:
-                        if isinstance(item, dict):
-                            # 提取IP地址 - 尝试多个可能的字段名
-                            ip = (item.get('ip') or 
-                                  item.get('host') or 
-                                  item.get('address') or
-                                  item.get('target') or
-                                  item.get('service', {}).get('ip') if isinstance(item.get('service'), dict) else None)
-                            
-                            # 提取端口 - 尝试多个可能的字段名
-                            port = (item.get('port') or 
-                                   item.get('service_port') or 
-                                   item.get('target_port') or
-                                   item.get('service', {}).get('port') if isinstance(item.get('service'), dict) else None)
-                            
-                            # 组合IP:PORT
-                            if ip and port:
-                                # 确保IP是有效的IP地址格式（不包含域名）
-                                if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
-                                    ip_port = f"{ip}:{port}"
-                                    all_ips.append(ip_port)
-                else:
-                    print("API响应中未找到有效数据结构")
-                    print(f"响应结构: {list(response_json.keys()) if isinstance(response_json, dict) else 'non-dict'}")
-                    return []
-                
-                # 去重结果
-                unique_ips = list(set(all_ips))
-                
-                if unique_ips:
-                    print(f"Quake360 API搜索成功: 总共找到 {len(unique_ips)} 个唯一IP")
-                    # 显示前10个IP
-                    print("提取到的IP地址:")
-                    for ip in unique_ips[:10]:
-                        print(f"  {ip}")
-                    if len(unique_ips) > 10:
-                        print(f"  ... 还有 {len(unique_ips) - 10} 个")
-                    
-                    return unique_ips
-                else:
-                    print("Quake360 API未找到有效的IP地址")
-                    return []
-                    
-            except json.JSONDecodeError as e:
-                print(f"JSON解析失败: {e}")
-                print("响应内容片段:")
-                print(response.text[:500])
+            response_json = response.json()
+            
+            # 检查API错误
+            code = response_json.get('code')
+            if code and str(code) not in ['0', '200', 'success']:
+                error_message = response_json.get('message', '未知错误')
+                print(f"Quake360 API错误: {code} - {error_message}")
+                if str(code) == 'q5000':
+                    print("  这是Quake360服务器内部错误，可能是临时问题，建议稍后重试")
                 return []
             
+            # 获取总数据量和分页信息
+            meta = response_json.get('meta', {})
+            pagination = meta.get('pagination', {})
+            total_count = pagination.get('total', 0)
+            page_size = pagination.get('page_size', 10)
+            current_page = pagination.get('page_index', 1)
+            
+            print(f"总数据量: {total_count}")
+            print(f"当前页: {current_page}, 页面大小: {page_size}")
+            
+            # 计算总页数
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1  # 向上取整
+            
+            # 应用最大页数限制
+            actual_pages = min(total_pages, self.max_pages)
+            print(f"总页数: {total_pages}, 实际获取页数: {actual_pages}")
+            
+            # 处理第一页数据
+            first_page_data = response_json.get('data', [])
+            page_ip_ports = self._extract_quake360_results(first_page_data)
+            all_ip_ports.extend(page_ip_ports)
+            print(f"第1页提取到 {len(page_ip_ports)} 个IP:PORT")
+            
+            # 如果有多页，继续获取其他页的数据
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
+                    
+                    # 更新分页参数
+                    query_data['start'] = (page - 1) * page_size
+                    
+                    # 添加延迟避免API限流
+                    time.sleep(2)
+                    
+                    try:
+                        response = requests.post(
+                            'https://quake.360.net/api/v3/search/quake_service',
+                            headers=headers,
+                            json=query_data,
+                            timeout=30
+                        )
+                        response.raise_for_status()
+                        
+                        response_json = response.json()
+                        
+                        # 检查错误
+                        code = response_json.get('code')
+                        if code and str(code) not in ['0', '200', 'success']:
+                            error_message = response_json.get('message', '未知错误')
+                            if str(code) == 'q5000':
+                                print(f"第{page}页Quake360服务器内部错误，跳过该页")
+                            else:
+                                print(f"第{page}页Quake360 API错误: {code} - {error_message}")
+                            continue
+                        
+                        page_data = response_json.get('data', [])
+                        page_ip_ports = self._extract_quake360_results(page_data)
+                        all_ip_ports.extend(page_ip_ports)
+                        print(f"第{page}页提取到 {len(page_ip_ports)} 个IP:PORT")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
+            
+            # 去重结果
+            unique_ips = list(set(all_ip_ports))
+            
+            print(f"Quake360 API总共提取到 {len(all_ip_ports)} 个IP:PORT")
+            print(f"去重后共 {len(unique_ips)} 个唯一IP")
+            
+            if unique_ips:
+                # 显示前10个IP
+                print("提取到的IP地址:")
+                for ip in unique_ips[:10]:
+                    print(f"  {ip}")
+                if len(unique_ips) > 10:
+                    print(f"  ... 还有 {len(unique_ips) - 10} 个")
+                
+                return unique_ips
+            else:
+                print("Quake360 API未找到有效的IP地址")
+                return []
+                
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_ip_ports)} 个结果")
+            return list(set(all_ip_ports))  # 返回已获取的去重结果
         except requests.exceptions.RequestException as e:
             print(f"Quake360 API请求失败: {e}")
             return []
         except Exception as e:
             print(f"Quake360 API搜索异常: {e}")
             return []
+    
+    def _extract_quake360_results(self, data_list):
+        """提取Quake360搜索结果数据"""
+        ip_ports = []
+        
+        for item in data_list:
+            if isinstance(item, dict):
+                # 提取IP地址 - 尝试多个可能的字段名
+                ip = (item.get('ip') or 
+                      item.get('host') or 
+                      item.get('address') or
+                      item.get('target') or
+                      item.get('service', {}).get('ip') if isinstance(item.get('service'), dict) else None)
+                
+                # 提取端口 - 尝试多个可能的字段名
+                port = (item.get('port') or 
+                       item.get('service_port') or 
+                       item.get('target_port') or
+                       item.get('service', {}).get('port') if isinstance(item.get('service'), dict) else None)
+                
+                # 组合IP:PORT
+                if ip and port:
+                    # 确保IP是有效的IP地址格式（不包含域名）
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
+                        ip_port = f"{ip}:{port}"
+                        ip_ports.append(ip_port)
+        
+        return ip_ports
     
         
     def test_port_connectivity(self, ip_port, timeout=2):
@@ -639,6 +956,169 @@ class IPTVSpeedTest:
         except Exception as e:
             return False
     
+    def get_udpxy_status(self, ip_port, timeout=5):
+        """获取udpxy状态页面的详细信息（如活跃连接数）"""
+        try:
+            # 构建状态页面URL
+            status_url = f"http://{ip_port}/status"
+            
+            # 创建session进行HTTP请求
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'udpxy-status-checker',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Connection': 'close'
+            })
+            
+            response = session.get(status_url, timeout=timeout)
+            response.raise_for_status()
+            
+            html_content = response.text
+            
+            # 使用BeautifulSoup解析HTML页面
+            if BEAUTIFULSOUP_AVAILABLE:
+                try:
+                    soup = BeautifulSoup(html_content, "html.parser")
+                    
+                    # 查找状态表格 (cellspacing='0')
+                    client_table = soup.find('table', attrs={'cellspacing': '0'})
+                    
+                    if client_table:
+                        # 找到所有的<td>标签
+                        td_tags = client_table.find_all('td')
+                        
+                        if len(td_tags) >= 4:
+                            # 获取状态信息
+                            addr = td_tags[2].text.strip() if len(td_tags) > 2 else "N/A"
+                            actv = td_tags[3].text.strip() if len(td_tags) > 3 else "0"
+                            
+                            try:
+                                actv_count = int(actv)
+                            except ValueError:
+                                actv_count = 0
+                            
+                            status_info = {
+                                'address': addr,
+                                'active_connections': actv_count,
+                                'status_available': True
+                            }
+                            
+                            return status_info
+                    else:
+                        # 没有找到标准格式的表格，尝试其他解析方式
+                        return self._parse_alternative_status_format(html_content)
+                        
+                except Exception as e:
+                    print(f"  BeautifulSoup解析状态页面失败: {e}")
+                    return self._parse_status_with_regex(html_content)
+            else:
+                # 如果没有BeautifulSoup，使用正则表达式解析
+                return self._parse_status_with_regex(html_content)
+            
+            # 如果所有解析方法都失败，返回默认状态
+            return {
+                'address': "N/A",
+                'active_connections': 0,
+                'status_available': False,
+                'error': "所有解析方法都失败"
+            }
+                
+        except requests.exceptions.RequestException as e:
+            return {
+                'address': "N/A", 
+                'active_connections': 0,
+                'status_available': False,
+                'error': f"请求失败: {e}"
+            }
+        except Exception as e:
+            return {
+                'address': "N/A",
+                'active_connections': 0, 
+                'status_available': False,
+                'error': f"未知错误: {e}"
+            }
+    
+    def _parse_alternative_status_format(self, html_content):
+        """解析其他格式的udpxy状态页面"""
+        try:
+            # 尝试查找常见的状态信息模式
+            import re
+            
+            # 查找活跃连接数的模式
+            patterns = [
+                r'active[^:]*:\s*(\d+)',
+                r'clients[^:]*:\s*(\d+)', 
+                r'connections[^:]*:\s*(\d+)',
+                r'>(\d+)</td>\s*</tr>\s*</table>',  # 表格最后一个数字
+            ]
+            
+            actv_count = 0
+            for pattern in patterns:
+                match = re.search(pattern, html_content, re.IGNORECASE)
+                if match:
+                    try:
+                        actv_count = int(match.group(1))
+                        break
+                    except ValueError:
+                        continue
+            
+            return {
+                'address': "Alternative Format",
+                'active_connections': actv_count,
+                'status_available': True
+            }
+            
+        except Exception as e:
+            return {
+                'address': "N/A",
+                'active_connections': 0,
+                'status_available': False,
+                'error': f"备用解析失败: {e}"
+            }
+    
+    def _parse_status_with_regex(self, html_content):
+        """使用正则表达式解析状态页面（不依赖BeautifulSoup）"""
+        try:
+            import re
+            
+            # 查找表格中的数据
+            td_pattern = r'<td[^>]*>(.*?)</td>'
+            td_matches = re.findall(td_pattern, html_content, re.IGNORECASE | re.DOTALL)
+            
+            if len(td_matches) >= 4:
+                addr = td_matches[2].strip() if len(td_matches) > 2 else "N/A"
+                actv_text = td_matches[3].strip() if len(td_matches) > 3 else "0"
+                
+                # 清理HTML标签
+                addr = re.sub(r'<[^>]+>', '', addr).strip()
+                actv_text = re.sub(r'<[^>]+>', '', actv_text).strip()
+                
+                try:
+                    actv_count = int(actv_text)
+                except ValueError:
+                    actv_count = 0
+                
+                return {
+                    'address': addr,
+                    'active_connections': actv_count,
+                    'status_available': True
+                }
+            
+            return {
+                'address': "N/A",
+                'active_connections': 0,
+                'status_available': False,
+                'error': "未找到有效的表格数据"
+            }
+            
+        except Exception as e:
+            return {
+                'address': "N/A",
+                'active_connections': 0,
+                'status_available': False,
+                'error': f"正则解析失败: {e}"
+            }
+    
     def filter_accessible_ips(self, ip_list):
         """过滤可访问的 IP 并验证是否为udpxy服务"""
         print(f"============IP端口检测，测试 {len(ip_list)} 个 IP==============")
@@ -649,11 +1129,17 @@ class IPTVSpeedTest:
         def test_single_ip(ip_port):
             # 先测试端口连通性
             if not self.test_port_connectivity(ip_port):
-                return None, False
+                return None, False, None
             
             # 再测试是否为udpxy服务
             is_udpxy = self.test_udpxy_service(ip_port)
-            return ip_port, is_udpxy
+            
+            # 如果是udpxy服务，获取状态信息
+            status_info = None
+            if is_udpxy:
+                status_info = self.get_udpxy_status(ip_port)
+            
+            return ip_port, is_udpxy, status_info
         
         # 并发测试端口连通性和udpxy服务
         with ThreadPoolExecutor(max_workers=30) as executor:
@@ -667,7 +1153,14 @@ class IPTVSpeedTest:
                     
                     if result[1]:  # 是udpxy服务
                         udpxy_ips.append(result[0])
-                        print(f"  ✓ udpxy服务: {result[0]}")
+                        status_info = result[2]  # 状态信息
+                        
+                        if status_info and status_info.get('status_available'):
+                            actv = status_info.get('active_connections', 0)
+                            addr = status_info.get('address', 'N/A')
+                            print(f"  ✓ udpxy服务: {result[0]} (活跃连接: {actv}, 地址: {addr})")
+                        else:
+                            print(f"  ✓ udpxy服务: {result[0]} (状态信息不可用)")
                     else:
                         print(f"  ✗ 非udpxy服务: {result[0]}")
         
@@ -778,8 +1271,17 @@ class IPTVSpeedTest:
             total_size = len(downloaded_data)
             total_duration = end_time - start_time
             
-            if total_duration <= 0 or total_size == 0:
-                print(f"  ! {ip_port} 无效的下载统计: size={total_size}, duration={total_duration}")
+            if total_duration <= 0:
+                print(f"  ! {ip_port} 下载时间异常: {total_duration}秒")
+                return None
+                
+            if total_size == 0:
+                print(f"  ! {ip_port} 未下载到数据，可能流地址无效")
+                return None
+            
+            # 检查是否下载量太少（可能连接有问题）
+            if total_size < 1024:  # 小于1KB
+                print(f"  ! {ip_port} 下载量过少: {total_size}字节，可能连接不稳定")
                 return None
             
             # 计算平均速度
@@ -1015,6 +1517,7 @@ def main():
   python speedtest_integrated_new.py Shanghai Telecom
   python speedtest_integrated_new.py Beijing Unicom
   python speedtest_integrated_new.py Guangzhou Mobile
+  python speedtest_integrated_new.py Shanghai Telecom --max-pages 5
 
 运营商可选: Telecom, Unicom, Mobile
         """
@@ -1022,6 +1525,8 @@ def main():
     
     parser.add_argument('region', help='省市名称 (如: Shanghai, Beijing)')
     parser.add_argument('isp', help='运营商 (Telecom/Unicom/Mobile)')
+    parser.add_argument('--max-pages', type=int, default=10, 
+                       help='最大翻页数限制 (默认: 10页)')
     
     args = parser.parse_args()
     
@@ -1032,8 +1537,25 @@ def main():
         print(f"支持的运营商: {', '.join(valid_isps)}")
         sys.exit(1)
     
+    # 验证最大页数参数
+    if args.max_pages < 1:
+        print(f"错误: 最大页数必须大于0，当前值: {args.max_pages}")
+        sys.exit(1)
+    
+    if args.max_pages > 50:
+        print(f"警告: 最大页数过大({args.max_pages})，建议不超过50页")
+        response = input("是否继续? (y/N): ")
+        if response.lower() != 'y':
+            print("用户取消操作")
+            sys.exit(0)
+    
+    print(f"配置信息:")
+    print(f"  地区: {args.region}")
+    print(f"  运营商: {args.isp}")
+    print(f"  最大翻页数: {args.max_pages}")
+    
     # 创建测试实例并运行
-    speedtest = IPTVSpeedTest(args.region, args.isp)
+    speedtest = IPTVSpeedTest(args.region, args.isp, args.max_pages)
     speedtest.run()
 
 
