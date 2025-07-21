@@ -3,15 +3,17 @@
 ## 主要修改内容
 
 ### 1. FOFA API 字段配置修改
-- 将字段配置从 `'fields': 'ip,port,host'` 修改为 `'fields': 'ip,host,port,link'`
-- 这样返回的JSON数据包含4个字段：[ip, host, port, link]
+- 将字段配置从 `'fields': 'ip,port,host'` 修改为 `'fields': 'ip,host,port,link,org'`
+- 这样返回的JSON数据包含5个字段：[ip, host, port, link, org]
+- 新增org字段用于运营商信息提取
 
 ### 2. FOFA API 数据提取逻辑优化
-修改了数据提取逻辑，正确处理FOFA API返回的4字段数据：
+修改了数据提取逻辑，正确处理FOFA API返回的5字段数据：
 - `result[0]` = ip
 - `result[1]` = host  
 - `result[2]` = port
 - `result[3]` = link
+- `result[4]` = org
 
 如果某些字段为空，会自动补全：
 - 如果host为空，从ip和port组合生成
@@ -66,6 +68,40 @@
   - 创建独立的 `_extract_quake360_results()` 方法处理数据提取
 - **错误处理**: 增强翻页过程中的异常处理和用户中断支持
 
+### 9. **新增地区和运营商过滤功能** ⭐
+- **新增命令行参数**:
+  - `--region`: 指定省份，不区分大小写，自动格式化为首字母大写
+  - `--isp`: 指定运营商，支持 Telecom/Unicom/Mobile，不区分大小写
+
+- **地区过滤实现**:
+  - **FOFA**: 添加 `&& region="{region}"` 条件
+  - **Quake360**: 添加 `AND province:"{region}"` 条件
+
+- **运营商过滤实现**:
+  - **FOFA运营商过滤**: 基于org字段进行复杂匹配
+    - **电信(Telecom)**: 匹配 `Chinanet`、`China Telecom`、`CHINA TELECOM`、`China Telecom Group` 等
+    - **移动(Mobile)**: 匹配 `China Mobile Communications Corporation`、省份级移动公司等
+    - **联通(Unicom)**: 匹配 `China Unicom`、`CHINA UNICOM China169 Backbone`、省份级联通网络等
+  - **Quake360运营商过滤**: 基于isp字段进行中文匹配
+    - **电信(Telecom)**: `AND isp:"中国电信"`
+    - **移动(Mobile)**: `AND isp:"中国移动"`
+    - **联通(Unicom)**: `AND isp:"中国联通"`
+
+- **组合过滤支持**:
+  - 可以单独指定地区或运营商
+  - 可以同时指定地区和运营商进行精确过滤
+  - 如果同时指定，FOFA的运营商过滤会额外匹配省份级运营商组织
+
+- **参数验证**:
+  - 地区参数自动格式化（首字母大写，其他小写）
+  - 运营商参数验证，只接受有效值（Telecom/Unicom/Mobile）
+  - 无效参数时显示警告并忽略
+
+### 10. Cookie字符串清理优化
+- 新增 `_clean_cookie_string()` 方法
+- 自动移除Cookie中的换行符、回车符、制表符
+- 清理多余空格，保持Cookie格式正确性
+
 ## 使用方法
 
 1. 配置环境变量（.env文件）：
@@ -78,17 +114,27 @@ QUAKE360_TOKEN=your_token
 
 2. 运行命令：
 ```bash
-# 单模式（默认30天）
+# 基本用法
 python makecsv.py --jsmpeg jsmpeg.csv
 
-# 单模式（指定7天）
+# 指定天数
 python makecsv.py --jsmpeg jsmpeg.csv --days 7
 
-# 多模式（默认30天）
-python makecsv.py --jsmpeg jsmpeg.csv --txiptv txiptv.csv --zhgxtv zhgxtv.csv
+# 指定地区
+python makecsv.py --jsmpeg jsmpeg.csv --region beijing
+python makecsv.py --jsmpeg jsmpeg.csv --region guangdong
 
-# 多模式（指定15天）
-python makecsv.py --jsmpeg jsmpeg.csv --txiptv txiptv.csv --zhgxtv zhgxtv.csv --days 15
+# 指定运营商
+python makecsv.py --jsmpeg jsmpeg.csv --isp telecom
+python makecsv.py --jsmpeg jsmpeg.csv --isp mobile
+python makecsv.py --jsmpeg jsmpeg.csv --isp unicom
+
+# 组合使用（地区+运营商）
+python makecsv.py --jsmpeg jsmpeg.csv --region guangdong --isp mobile
+python makecsv.py --jsmpeg jsmpeg.csv --region beijing --isp telecom --days 7
+
+# 多模式组合使用
+python makecsv.py --jsmpeg jsmpeg.csv --txiptv txiptv.csv --zhgxtv zhgxtv.csv --region shanghai --isp unicom --days 15
 ```
 
 ## 参数说明
@@ -97,11 +143,40 @@ python makecsv.py --jsmpeg jsmpeg.csv --txiptv txiptv.csv --zhgxtv zhgxtv.csv --
 - `--txiptv`: txiptv模式CSV文件路径  
 - `--zhgxtv`: zhgxtv模式CSV文件路径
 - `--days`: 日期过滤天数，搜索最近N天的数据，默认为30天
+- `--region`: 指定省份，不区分大小写，格式化为首字母大写其他小写
+- `--isp`: 指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写
+
+## 搜索规则示例
+
+基本搜索（默认30天）：
+```
+FOFA: title="jsmpeg-streamer" && country="CN" && after="2025-06-21"
+Quake360: title:"jsmpeg-streamer" AND country:"China"
+```
+
+带地区过滤：
+```
+FOFA: title="jsmpeg-streamer" && country="CN" && after="2025-06-21" && region="Guangdong"
+Quake360: title:"jsmpeg-streamer" AND country:"China" AND province:"Guangdong"
+```
+
+带运营商过滤（电信）：
+```
+FOFA: title="jsmpeg-streamer" && country="CN" && after="2025-06-21" && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group")
+Quake360: title:"jsmpeg-streamer" AND country:"China" AND isp:"中国电信"
+```
+
+组合过滤（广东电信）：
+```
+FOFA: title="jsmpeg-streamer" && country="CN" && after="2025-06-21" && region="Guangdong" && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group" || org="Guangdong Telecom" || org="CHINANET Guangdong province network" || org="CHINANET Guangdong province backbone")
+Quake360: title:"jsmpeg-streamer" AND country:"China" AND province:"Guangdong" AND isp:"中国电信"
+```
 
 ## 去重规则
 
 1. **host字段去重**: 相同的 `ip:port` 只保留一个
 2. **C段+端口去重**: 同一个C段(如192.168.1.x)的相同端口只保留一个
+3. **优先级**: 现有CSV数据 > 新搜索数据
 
 例如：
 - `192.168.1.1:8080` 和 `192.168.1.2:8080` → 只保留第一个（同C段同端口）
@@ -112,4 +187,18 @@ python makecsv.py --jsmpeg jsmpeg.csv --txiptv txiptv.csv --zhgxtv zhgxtv.csv --
 生成的CSV包含标准字段：
 host,ip,port,protocol,title,domain,country,city,link,org
 
-其中必填字段由搜索引擎提供，其他字段使用默认值。
+其中必填字段由搜索引擎提供，其他字段使用默认值。新增的org字段包含运营商信息。
+
+## 支持的地区名称
+
+地区参数会自动格式化，支持中文省份名称的英文形式，例如：
+- beijing → Beijing
+- guangdong → Guangdong  
+- shanghai → Shanghai
+- sichuan → Sichuan
+
+## 支持的运营商
+
+- **telecom / Telecom**: 中国电信及其省份分公司
+- **mobile / Mobile**: 中国移动及其省份分公司
+- **unicom / Unicom**: 中国联通及其省份分公

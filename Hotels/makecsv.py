@@ -7,19 +7,30 @@ IPTV 源数据获取与合并工具
 2. 合并现有CSV文件数据
 3. 按照指定规则进行去重（host排重，同一个C段IP不同端口去重）
 4. 更新CSV文件
+5. 支持按省份和运营商过滤搜索结果
 
 用法：
 单模式：python makecsv.py --jsmpeg jsmpeg_hosts.csv
 多模式：python makecsv.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv --zhgxtv zhgxtv_hosts.csv
 指定天数：python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7
+指定省份：python makecsv.py --jsmpeg jsmpeg_hosts.csv --region beijing
+指定运营商：python makecsv.py --jsmpeg jsmpeg_hosts.csv --isp telecom
+综合使用：python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7 --region guangdong --isp mobile
 
 参数说明：
 --days: 日期过滤天数，搜索最近N天的数据，默认为30天
+--region: 指定省份，不区分大小写，格式化为首字母大写其他小写
+--isp: 指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写
 
-搜索规则（自动添加指定天数的日期限制）：
+搜索规则（自动添加指定天数的日期限制，以及省份和运营商限制）：
 --jsmpeg: 搜索 title="jsmpeg-streamer" && country="CN" && after="YYYY-MM-DD"
 --txiptv: 搜索 body="/iptv/live/zh_cn.js" && country="CN" && after="YYYY-MM-DD"
 --zhgxtv: 搜索 body="ZHGXTV" && country="CN" && after="YYYY-MM-DD"
+
+省份和运营商过滤规则：
+1. 只指定region：FOFA增加 && region="{region}"，Quake360增加 AND province:"{region}"
+2. 只指定isp：FOFA增加运营商org过滤条件，Quake360增加 AND isp:"中国XXX"
+3. 同时指定region和isp：同时应用上述两种过滤规则
 
 环境变量配置：
 FOFA_COOKIE - FOFA网站登录Cookie
@@ -73,9 +84,13 @@ except ImportError:
 class IPTVSourceCollector:
     """IPTV 源数据收集器"""
     
-    def __init__(self, days=30):
+    def __init__(self, days=30, region=None, isp=None):
         # 保存日期过滤参数
         self.days = days
+        
+        # 格式化region和isp参数
+        self.region = self._format_region(region) if region else None
+        self.isp = self._format_isp(isp) if isp else None
         
         # 加载环境变量
         load_dotenv()
@@ -105,6 +120,24 @@ class IPTVSourceCollector:
         
         return cleaned
     
+    def _format_region(self, region):
+        """格式化省份参数，首字母大写其他小写"""
+        if not region:
+            return None
+        return region.strip().capitalize()
+    
+    def _format_isp(self, isp):
+        """格式化运营商参数，首字母大写其他小写"""
+        if not isp:
+            return None
+        formatted = isp.strip().capitalize()
+        # 验证运营商参数是否有效
+        valid_isps = ['Telecom', 'Unicom', 'Mobile']
+        if formatted not in valid_isps:
+            print(f"警告: 无效的运营商参数 '{isp}', 有效值为: {', '.join(valid_isps)}")
+            return None
+        return formatted
+    
     def _get_date_filter(self, days=30):
         """获取日期过滤器，返回当前日期减去指定天数的日期字符串"""
         # 计算指定天数前的日期
@@ -112,6 +145,54 @@ class IPTVSourceCollector:
         # 格式化为 YYYY-MM-DD 格式
         date_str = target_date.strftime("%Y-%m-%d")
         return f'after="{date_str}"'
+    
+    def _get_region_filter_fofa(self):
+        """获取FOFA的省份过滤器"""
+        if not self.region:
+            return ""
+        return f' && region="{self.region}"'
+    
+    def _get_region_filter_quake360(self):
+        """获取Quake360的省份过滤器"""
+        if not self.region:
+            return ""
+        return f' AND province:"{self.region}"'
+    
+    def _get_isp_filter_fofa(self):
+        """获取FOFA的运营商过滤器"""
+        if not self.isp:
+            return ""
+        
+        if self.isp == 'Telecom':
+            if self.region:
+                return f' && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group" || org="{self.region} Telecom" || org="CHINANET {self.region} province network" || org="CHINANET {self.region} province backbone")'
+            else:
+                return f' && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group")'
+        elif self.isp == 'Mobile':
+            if self.region:
+                return f' && (org="{self.region} Mobile Communication Company Limited" || org="{self.region} Mobile Communications Co." || org="China Mobile Communicaitons Corporation" || org="China Mobile Group {self.region} communications corporation" || org="China Mobile Group {self.region} Co.")'
+            else:
+                return f' && (org="China Mobile Communicaitons Corporation")'
+        elif self.isp == 'Unicom':
+            if self.region:
+                return f' && (org="CHINA UNICOM China169 Backbone" || org="China Unicom" || org="China Unicom IP network" || org="CHINA UNICOM Industrial Internet Backbone" || org="China Unicom {self.region} network" || org="China Unicom {self.region} IP network" || org="China Unicom {self.region} Province Network" || org="UNICOM {self.region} province network" || org="China Unicom IP network China169 {self.region} province")'
+            else:
+                return f' && (org="CHINA UNICOM China169 Backbone" || org="China Unicom" || org="China Unicom IP network" || org="CHINA UNICOM Industrial Internet Backbone")'
+        
+        return ""
+    
+    def _get_isp_filter_quake360(self):
+        """获取Quake360的运营商过滤器"""
+        if not self.isp:
+            return ""
+        
+        isp_mapping = {
+            'Telecom': ' AND isp:"中国电信"',
+            'Unicom': ' AND isp:"中国联通"',
+            'Mobile': ' AND isp:"中国移动"'
+        }
+        
+        return isp_mapping.get(self.isp, "")
     
     def _validate_config(self):
         """验证必要的配置是否已设置"""
@@ -202,7 +283,7 @@ class IPTVSourceCollector:
             params = {
                 'key': self.fofa_api_key,
                 'qbase64': query_b64,
-                'fields': 'ip,host,port,link',
+                'fields': 'ip,host,port,link,org',
                 'size': 100,  # 默认每页100条
                 'page': 1,
                 'full': 'false'
@@ -296,11 +377,12 @@ class IPTVSourceCollector:
         
         for result in results:
             if len(result) >= 3:  # 至少需要3个字段
-                # FOFA API fields='ip,host,port,link' 返回格式为 [ip, host, port, link]
+                # FOFA API fields='ip,host,port,link,org' 返回格式为 [ip, host, port, link, org]
                 ip = str(result[0]).strip() if result[0] else ''
                 host = str(result[1]).strip() if result[1] else ''
                 port = str(result[2]).strip() if result[2] else ''
                 link = str(result[3]).strip() if len(result) > 3 and result[3] else ''
+                org = str(result[4]).strip() if len(result) > 4 and result[4] else ''
                 
                 # 处理host字段
                 if not host and ip and port:
@@ -335,7 +417,7 @@ class IPTVSourceCollector:
                         'domain': '',
                         'country': 'CN',
                         'city': '',
-                        'org': '',
+                        'org': org,
                         '_source': 'fofa_api'
                     })
         
@@ -952,9 +1034,15 @@ class IPTVSourceCollector:
         # 获取日期过滤器
         date_filter = self._get_date_filter(self.days)
         
-        # 搜索查询（添加日期限制）
-        fofa_query = f'title="jsmpeg-streamer" && country="CN" && {date_filter}'
-        quake360_query = 'title:"jsmpeg-streamer" AND country:"China"'
+        # 获取省份和运营商过滤器
+        region_filter_fofa = self._get_region_filter_fofa()
+        isp_filter_fofa = self._get_isp_filter_fofa()
+        region_filter_quake360 = self._get_region_filter_quake360()
+        isp_filter_quake360 = self._get_isp_filter_quake360()
+        
+        # 搜索查询（添加日期限制和省份运营商限制）
+        fofa_query = f'title="jsmpeg-streamer" && country="CN" && {date_filter}{region_filter_fofa}{isp_filter_fofa}'
+        quake360_query = f'title:"jsmpeg-streamer" AND country:"China"{region_filter_quake360}{isp_filter_quake360}'
         
         print(f"FOFA查询: {fofa_query}")
         print(f"Quake360查询: {quake360_query}")
@@ -981,9 +1069,15 @@ class IPTVSourceCollector:
         # 获取日期过滤器
         date_filter = self._get_date_filter(self.days)
         
-        # 搜索查询（添加日期限制）
-        fofa_query = f'body="/iptv/live/zh_cn.js" && country="CN" && {date_filter}'
-        quake360_query = 'body:"/iptv/live/zh_cn.js" AND country:"China"'
+        # 获取省份和运营商过滤器
+        region_filter_fofa = self._get_region_filter_fofa()
+        isp_filter_fofa = self._get_isp_filter_fofa()
+        region_filter_quake360 = self._get_region_filter_quake360()
+        isp_filter_quake360 = self._get_isp_filter_quake360()
+        
+        # 搜索查询（添加日期限制和省份运营商限制）
+        fofa_query = f'body="/iptv/live/zh_cn.js" && country="CN" && {date_filter}{region_filter_fofa}{isp_filter_fofa}'
+        quake360_query = f'body:"/iptv/live/zh_cn.js" AND country:"China"{region_filter_quake360}{isp_filter_quake360}'
         
         print(f"FOFA查询: {fofa_query}")
         print(f"Quake360查询: {quake360_query}")
@@ -1010,9 +1104,15 @@ class IPTVSourceCollector:
         # 获取日期过滤器
         date_filter = self._get_date_filter(self.days)
         
-        # 搜索查询（添加日期限制）
-        fofa_query = f'body="ZHGXTV" && country="CN" && {date_filter}'
-        quake360_query = 'body:"ZHGXTV" AND country:"China"'
+        # 获取省份和运营商过滤器
+        region_filter_fofa = self._get_region_filter_fofa()
+        isp_filter_fofa = self._get_isp_filter_fofa()
+        region_filter_quake360 = self._get_region_filter_quake360()
+        isp_filter_quake360 = self._get_isp_filter_quake360()
+        
+        # 搜索查询（添加日期限制和省份运营商限制）
+        fofa_query = f'body="ZHGXTV" && country="CN" && {date_filter}{region_filter_fofa}{isp_filter_fofa}'
+        quake360_query = f'body:"ZHGXTV" AND country:"China"{region_filter_quake360}{isp_filter_quake360}'
         
         print(f"FOFA查询: {fofa_query}")
         print(f"Quake360查询: {quake360_query}")
@@ -1040,6 +1140,8 @@ def main():
     parser.add_argument('--txiptv', help='txiptv模式CSV文件路径')
     parser.add_argument('--zhgxtv', help='zhgxtv模式CSV文件路径')
     parser.add_argument('--days', type=int, default=30, help='日期过滤天数，默认30天')
+    parser.add_argument('--region', help='指定省份，不区分大小写，格式化为首字母大写其他小写')
+    parser.add_argument('--isp', help='指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写')
     
     args = parser.parse_args()
     
@@ -1049,11 +1151,12 @@ def main():
         print("用法示例:")
         print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv")
         print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7")
-        print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv --zhgxtv zhgxtv_hosts.csv --days 15")
+        print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --region beijing --isp telecom")
+        print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv --zhgxtv zhgxtv_hosts.csv --days 15 --region guangdong --isp mobile")
         sys.exit(1)
     
     # 创建收集器实例
-    collector = IPTVSourceCollector(days=args.days)
+    collector = IPTVSourceCollector(days=args.days, region=args.region, isp=args.isp)
     
     # 处理各种模式
     if args.jsmpeg:
@@ -1066,6 +1169,14 @@ def main():
         collector.process_zhgxtv(args.zhgxtv)
     
     print("\n=== 处理完成 ===")
+    
+    # 显示使用的参数
+    if collector.region or collector.isp:
+        print(f"使用的参数:")
+        if collector.region:
+            print(f"  省份: {collector.region}")
+        if collector.isp:
+            print(f"  运营商: {collector.isp}")
 
 
 if __name__ == "__main__":
