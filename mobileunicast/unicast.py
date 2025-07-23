@@ -50,24 +50,36 @@ class UnicastProcessor:
     # URL列表
     URLS = [
         "https://live.zbds.org/tv/yd.txt",
-        "https://chinaiptv.pages.dev/Unicast/anhui/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/fujian/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/guangxi/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/hebei/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/heilongjiang/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/henan/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/hubei/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/jiangxi/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/jiangsu/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/shan3xi/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/shandong/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/zhejiang/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/anhui/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/fujian/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/guangxi/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/hebei/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/heilongjiang/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/henan/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/hubei/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/jiangxi/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/jiangsu/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shan3xi/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shandong/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/zhejiang/mobile.txt",
         "https://mycode.zhoujie218.top/me/jsyd.txt",
         "https://live.zbds.org/tv/zjyd.txt",
         "https://live.zbds.org/tv/zjyd1.txt",
         "https://live.zbds.org/tv/jxyd.txt",
         "https://live.zbds.org/tv/sxyd.txt",
-        "https://live.zbds.org/tv/iptv4.txt"
+        "https://vdyun.com/hbm3u.txt",
+        "https://vdyun.com/hbcm.txt",
+        "https://vdyun.com/hbcm1.txt",
+        "https://vdyun.com/hbcm2.txt",
+        "https://vdyun.com/sjzcm.txt",
+        "https://vdyun.com/sjzcm1.txt",
+        "https://vdyun.com/sjzcm2.txt",
+        "https://vdyun.com/sjzcm3.txt",
+        "https://vdyun.com/hncm.txt",
+        "https://vdyun.com/hljcm.txt",
+        "https://vdyun.com/shxcm.txt",
+        "https://vdyun.com/shxcm1.txt",
+        "https://vdyun.com/tv/itvlist.txt"
     ]
     
     # 分组关键字
@@ -503,6 +515,36 @@ class UnicastProcessor:
         except Exception as e:
             print(f"✗ 写入测速日志失败: {e}")
     
+    def _select_top_urls_per_channel(self, tested_channels):
+        """为每个频道选择速度最快的前N个URL"""
+        print(f"为每个频道选择速度最快的前 {self.top_count} 个URL源...")
+        
+        # 按频道名分组
+        channel_groups = {}
+        for channel in tested_channels:
+            if channel.speed > 0:  # 只考虑测速成功的频道
+                if channel.name not in channel_groups:
+                    channel_groups[channel.name] = []
+                channel_groups[channel.name].append(channel)
+        
+        # 为每个频道选择前N个最快的URL
+        selected_channels = []
+        for channel_name, channels in channel_groups.items():
+            # 按速度降序排序
+            channels.sort(key=lambda x: x.speed, reverse=True)
+            
+            # 取前N个
+            top_channels_for_this_name = channels[:self.top_count]
+            selected_channels.extend(top_channels_for_this_name)
+            
+            # 打印每个频道的保留情况
+            if len(channels) > self.top_count:
+                print(f"  {channel_name}: 从 {len(channels)} 个源中保留前 {len(top_channels_for_this_name)} 个")
+            else:
+                print(f"  {channel_name}: 保留全部 {len(top_channels_for_this_name)} 个源")
+        
+        return selected_channels
+    
     def group_channel(self, channel_name):
         """对频道进行分组"""
         name = channel_name.lower()
@@ -539,6 +581,24 @@ class UnicastProcessor:
             group = self.group_channel(channel.name)
             grouped[group].append(channel)
         
+        # 在每个分组内，按频道名称和速度排序
+        for group_name in grouped:
+            # 先按频道名称分组，再在每个频道内按速度排序
+            channel_dict = {}
+            for channel in grouped[group_name]:
+                if channel.name not in channel_dict:
+                    channel_dict[channel.name] = []
+                channel_dict[channel.name].append(channel)
+            
+            # 对每个频道内的URL按速度排序（快到慢）
+            sorted_channels = []
+            for channel_name in sorted(channel_dict.keys()):
+                channel_urls = channel_dict[channel_name]
+                channel_urls.sort(key=lambda x: x.speed, reverse=True)
+                sorted_channels.extend(channel_urls)
+            
+            grouped[group_name] = sorted_channels
+        
         return grouped
     
     def generate_m3u_file(self, grouped_channels, output_path):
@@ -562,16 +622,30 @@ class UnicastProcessor:
                 channels = grouped_channels.get(group_name, [])
                 if not channels:
                     continue
-                    
+                
+                # 按频道名称合并，显示速度信息
+                channel_dict = {}
                 for channel in channels:
-                    f.write(f'#EXTINF:-1 group-title="{group_name}",{channel.name}\n')
-                    f.write(f'{channel.url}\n')
+                    if channel.name not in channel_dict:
+                        channel_dict[channel.name] = []
+                    channel_dict[channel.name].append(channel)
+                
+                # 写入每个频道的每个URL（在M3U中分别列出）
+                for channel_name in sorted(channel_dict.keys()):
+                    channel_urls = channel_dict[channel_name]
+                    # 确保按速度排序（快到慢）
+                    channel_urls.sort(key=lambda x: x.speed, reverse=True)
+                    
+                    for channel in channel_urls:
+                        # 统一使用频道名，不添加序号和速度信息
+                        f.write(f'#EXTINF:-1 group-title="{group_name}",{channel.name}\n')
+                        f.write(f'{channel.url}\n')
         
         print(f"M3U文件已生成，包含以下分组:")
         for group_name in group_order:
             count = len(grouped_channels.get(group_name, []))
             if count > 0:
-                print(f"  {group_name}: {count} 个频道")
+                print(f"  {group_name}: {count} 个频道源")
     
     def generate_txt_file(self, grouped_channels, output_path):
         """生成TXT格式的播放列表文件"""
@@ -594,8 +668,23 @@ class UnicastProcessor:
                     continue
                     
                 f.write(f"{group_name},#genre#\n")
+                
+                # 按频道名称合并多个URL
+                channel_dict = {}
                 for channel in channels:
-                    f.write(f"{channel.name},{channel.url}\n")
+                    if channel.name not in channel_dict:
+                        channel_dict[channel.name] = []
+                    channel_dict[channel.name].append(channel)
+                
+                # 写入每个频道（每个URL单独一行）
+                for channel_name in sorted(channel_dict.keys()):
+                    channel_urls = channel_dict[channel_name]
+                    # 确保按速度排序（快到慢）
+                    channel_urls.sort(key=lambda x: x.speed, reverse=True)
+                    
+                    for channel in channel_urls:
+                        f.write(f"{channel.name},{channel.url}\n")
+                
                 f.write("\n")
     
     def run(self):
@@ -628,11 +717,10 @@ class UnicastProcessor:
         # 4. 测速
         tested_channels = self.speed_test_channels(unique_channels)
         
-        # 5. 按速度排序并取前N个
-        tested_channels.sort(key=lambda x: x.speed, reverse=True)
-        top_channels = tested_channels[:self.top_count]
+        # 5. 按频道名分组，每个频道保留速度最快的前N个URL
+        top_channels = self._select_top_urls_per_channel(tested_channels)
         
-        print(f"保留速度最快的前 {len(top_channels)} 个频道")
+        print(f"处理后总共保留 {len(top_channels)} 个频道源")
         
         # 6. 重新分组
         grouped_channels = self.group_channels(top_channels)
@@ -658,7 +746,7 @@ def main():
     )
     
     parser.add_argument('--top', type=int, default=20,
-                       help='保留速度最快的前N个频道 (默认: 20)')
+                       help='每个频道最多保留速度最快的前N个URL源 (默认: 20)')
     
     args = parser.parse_args()
     
