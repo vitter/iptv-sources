@@ -71,15 +71,11 @@ class UnicastProcessor:
         "https://vdyun.com/hbcm.txt",
         "https://vdyun.com/hbcm1.txt",
         "https://vdyun.com/hbcm2.txt",
-        "https://vdyun.com/sjzcm.txt",
         "https://vdyun.com/sjzcm1.txt",
         "https://vdyun.com/sjzcm2.txt",
-        "https://vdyun.com/sjzcm3.txt",
-        "https://vdyun.com/hncm.txt",
         "https://vdyun.com/hljcm.txt",
         "https://vdyun.com/shxcm.txt",
-        "https://vdyun.com/shxcm1.txt",
-        "https://vdyun.com/tv/itvlist.txt"
+        "https://vdyun.com/shxcm1.txt"
     ]
     
     # 分组关键字
