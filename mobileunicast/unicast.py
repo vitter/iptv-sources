@@ -274,6 +274,14 @@ class UnicastProcessor:
         # 将CCTV-1统一为CCTV1，CGTN-英语统一为CGTN英语等
         name = re.sub(r'CCTV-(\d+)', r'CCTV\1', name, flags=re.IGNORECASE)
         name = re.sub(r'CGTN-(\w+)', r'CGTN\1', name, flags=re.IGNORECASE)
+        
+        # CCTV频道特殊处理：除了CCTV5+，其他CCTV频道去除+、-、空格、*符号
+        if re.match(r'CCTV', name, re.IGNORECASE):
+            # 保护CCTV5+不被修改
+            if not re.match(r'CCTV5\+', name, re.IGNORECASE):
+                # 去除+、-、空格、*符号
+                name = re.sub(r'[+\-\s*]', '', name)
+        
         return name
     
     def test_stream_speed(self, channel: ChannelInfo, timeout=8):
@@ -592,7 +600,24 @@ class UnicastProcessor:
             
             # 对每个频道内的URL按速度排序（快到慢）
             sorted_channels = []
-            for channel_name in sorted(channel_dict.keys()):
+            
+            # CCTV频道特殊排序：按数字大小排序
+            if group_name == ChannelGroup.CCTV:
+                def cctv_sort_key(channel_name):
+                    # 提取CCTV后面的数字
+                    match = re.search(r'CCTV(\d+)', channel_name, re.IGNORECASE)
+                    if match:
+                        return int(match.group(1))
+                    # 非数字CCTV频道（如CGTN）排在最后
+                    return 999
+                
+                # 按CCTV数字大小排序
+                sorted_channel_names = sorted(channel_dict.keys(), key=cctv_sort_key)
+            else:
+                # 其他分组按频道名称字母排序
+                sorted_channel_names = sorted(channel_dict.keys())
+            
+            for channel_name in sorted_channel_names:
                 channel_urls = channel_dict[channel_name]
                 channel_urls.sort(key=lambda x: x.speed, reverse=True)
                 sorted_channels.extend(channel_urls)
@@ -630,8 +655,21 @@ class UnicastProcessor:
                         channel_dict[channel.name] = []
                     channel_dict[channel.name].append(channel)
                 
+                # CCTV频道特殊排序逻辑
+                if group_name == ChannelGroup.CCTV:
+                    def cctv_sort_key(channel_name):
+                        # 提取CCTV后面的数字
+                        match = re.search(r'CCTV(\d+)', channel_name, re.IGNORECASE)
+                        if match:
+                            return int(match.group(1))
+                        # 非数字CCTV频道（如CGTN）排在最后
+                        return 999
+                    sorted_channel_names = sorted(channel_dict.keys(), key=cctv_sort_key)
+                else:
+                    sorted_channel_names = sorted(channel_dict.keys())
+                
                 # 写入每个频道的每个URL（在M3U中分别列出）
-                for channel_name in sorted(channel_dict.keys()):
+                for channel_name in sorted_channel_names:
                     channel_urls = channel_dict[channel_name]
                     # 确保按速度排序（快到慢）
                     channel_urls.sort(key=lambda x: x.speed, reverse=True)
@@ -676,8 +714,21 @@ class UnicastProcessor:
                         channel_dict[channel.name] = []
                     channel_dict[channel.name].append(channel)
                 
+                # CCTV频道特殊排序逻辑
+                if group_name == ChannelGroup.CCTV:
+                    def cctv_sort_key(channel_name):
+                        # 提取CCTV后面的数字
+                        match = re.search(r'CCTV(\d+)', channel_name, re.IGNORECASE)
+                        if match:
+                            return int(match.group(1))
+                        # 非数字CCTV频道（如CGTN）排在最后
+                        return 999
+                    sorted_channel_names = sorted(channel_dict.keys(), key=cctv_sort_key)
+                else:
+                    sorted_channel_names = sorted(channel_dict.keys())
+                
                 # 写入每个频道（每个URL单独一行）
-                for channel_name in sorted(channel_dict.keys()):
+                for channel_name in sorted_channel_names:
                     channel_urls = channel_dict[channel_name]
                     # 确保按速度排序（快到慢）
                     channel_urls.sort(key=lambda x: x.speed, reverse=True)
