@@ -84,7 +84,7 @@ class UnicastProcessor:
               "广东", "海南", "四川", "贵州", "云南", "陕西", "甘肃", "青海", "内蒙", 
               "广西", "西藏", "宁夏", "新疆", "东南", "东方")
     
-    hkmotw = ("凤凰", "香港", "TVB", "tvb", "星空", "无线", "无线电视", "无线新闻", "无线娱乐","大爱", "亚洲", "华视", "中天", "中视", "民视", "东森", "三立", "台视", "公视", "台湾","澳门", "澳视", "澳亚", "澳广")
+    hkmotw = ("凤凰", "香港", "TVB", "tvb", "翡翠", "人间", "唯心", "星空", "无线", "无线电视", "无线新闻", "无线娱乐","大爱", "亚洲", "华视", "中天", "中视", "民视", "东森", "三立", "台视", "公视", "台湾","澳门", "澳视", "澳亚", "澳广")
     
     wei_shi = ("卫视",)
     
@@ -157,7 +157,7 @@ class UnicastProcessor:
         
         # 并发下载
         downloaded_files = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(download_single_file, url) for url in self.URLS]
             for future in as_completed(futures):
                 result = future.result()
@@ -481,7 +481,7 @@ class UnicastProcessor:
         tested_channels = []
         
         # 进一步减少并发数，避免网络拥堵和系统资源耗尽
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = [executor.submit(test_single_channel, i, channel) 
                       for i, channel in enumerate(channels)]
             
@@ -556,14 +556,14 @@ class UnicastProcessor:
         if "cctv" in name or "cgtn" in name:
             return ChannelGroup.CCTV
         
+        if any(key in channel_name for key in self.hkmotw):
+            return ChannelGroup.HKMOTW
+        
         if any(key in channel_name for key in self.wei_shi):
             return ChannelGroup.WEI_SHI
             
         if any(key in channel_name for key in self.locals):
             return ChannelGroup.LOCAL
-            
-        if any(key in channel_name for key in self.hkmotw):
-            return ChannelGroup.HKMOTW
             
         if any(key in channel_name for key in self.citys):
             return ChannelGroup.CITY
@@ -630,8 +630,8 @@ class UnicastProcessor:
         group_order = [
             ChannelGroup.CCTV,
             ChannelGroup.WEI_SHI, 
-            ChannelGroup.LOCAL,
             ChannelGroup.HKMOTW,
+            ChannelGroup.LOCAL,
             ChannelGroup.CITY,
             ChannelGroup.OTHER
         ]
@@ -689,8 +689,8 @@ class UnicastProcessor:
         group_order = [
             ChannelGroup.CCTV,
             ChannelGroup.WEI_SHI,
-            ChannelGroup.LOCAL, 
             ChannelGroup.HKMOTW,
+            ChannelGroup.LOCAL, 
             ChannelGroup.CITY,
             ChannelGroup.OTHER
         ]
