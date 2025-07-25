@@ -41,14 +41,14 @@ class ChannelInfo:
 
 class ISPGroup:
     """运营商分组枚举类"""
-    CHINA_TELECOM = "中国电信"
-    CHINA_UNICOM = "中国联通"
-    CHINA_MOBILE = "中国移动"
-    CHINA_RAILCOM = "中国铁通"
+    CHINA_TELECOM = "电信"
+    CHINA_UNICOM = "联通"
+    CHINA_MOBILE = "移动"
+    CHINA_RAILCOM = "铁通"
     CERNET = "教育网"
-    BROADBAND = "广电网络"
-    OTHER = "其他运营商"
-    UNKNOWN = "未知运营商"
+    BROADBAND = "广电网"
+    OTHER = "其他"
+    UNKNOWN = "未知"
 
 
 class ChannelGroup:
@@ -549,7 +549,7 @@ class ISPProcessor:
             return target, isp
         
         # 使用更保守的并发数避免API限制
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(query_single_target, target) 
                       for target in target_to_channels.keys()]
             
@@ -989,91 +989,6 @@ class ISPProcessor:
         
         return grouped
     
-    def generate_m3u_file(self, grouped_channels, output_path):
-        """生成M3U格式的播放列表文件（按运营商和频道类型两级分组）"""
-        print(f"生成M3U文件: {output_path}")
-        
-        # 按运营商的优先级排序
-        isp_order = [
-            ISPGroup.CHINA_TELECOM,
-            ISPGroup.CHINA_UNICOM,
-            ISPGroup.CHINA_MOBILE,
-            ISPGroup.CHINA_RAILCOM,
-            ISPGroup.CERNET,
-            ISPGroup.BROADBAND,
-            ISPGroup.OTHER,
-            ISPGroup.UNKNOWN
-        ]
-        
-        # 按频道类型的优先级排序
-        channel_type_order = [
-            ChannelGroup.CCTV,
-            ChannelGroup.WEI_SHI,
-            ChannelGroup.HKMOTW,
-            ChannelGroup.LOCAL,
-            ChannelGroup.CITY,
-            ChannelGroup.OTHER
-        ]
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write("#EXTM3U\n")
-            
-            for isp_group in isp_order:
-                if isp_group not in grouped_channels:
-                    continue
-                
-                # 检查该运营商是否有频道
-                has_channels = any(len(grouped_channels[isp_group][ct]) > 0 for ct in channel_type_order)
-                if not has_channels:
-                    continue
-                
-                # 写入运营商分组注释
-                f.write(f"\n# ========== {isp_group} ==========\n")
-                
-                for channel_type in channel_type_order:
-                    channels = grouped_channels[isp_group].get(channel_type, [])
-                    if not channels:
-                        continue
-                    
-                    # 写入频道类型分组注释
-                    f.write(f"\n# --- {channel_type} ---\n")
-                    
-                    # 按频道名称合并，显示运营商、频道类型和速度信息
-                    channel_dict = {}
-                    for channel in channels:
-                        if channel.name not in channel_dict:
-                            channel_dict[channel.name] = []
-                        channel_dict[channel.name].append(channel)
-                    
-                    # 对于CCTV频道特殊排序
-                    if channel_type == ChannelGroup.CCTV:
-                        def cctv_sort_key(channel_name):
-                            match = re.search(r'CCTV(\d+)', channel_name, re.IGNORECASE)
-                            if match:
-                                return int(match.group(1))
-                            return 999
-                        sorted_channel_names = sorted(channel_dict.keys(), key=cctv_sort_key)
-                    else:
-                        sorted_channel_names = sorted(channel_dict.keys())
-                    
-                    # 写入每个频道的每个URL
-                    for channel_name in sorted_channel_names:
-                        channel_urls = channel_dict[channel_name]
-                        # 确保按速度排序（快到慢）
-                        channel_urls.sort(key=lambda x: x.speed, reverse=True)
-                        
-                        for i, channel in enumerate(channel_urls):
-                            # 在频道名称中显示运营商和速度信息
-                            display_name = f"{channel.name}[{channel.isp}][{channel.speed:.2f}MB/s]"
-                            if len(channel_urls) > 1:
-                                display_name += f"[源{i+1}]"
-                            
-                            f.write(f"#EXTINF:-1,{display_name}\n")
-                            f.write(f"{channel.url}\n")
-        
-        print(f"M3U文件已生成，包含以下分组:")
-        self._print_group_statistics(grouped_channels)
-    
     def generate_txt_file(self, grouped_channels, output_path):
         """生成TXT格式的播放列表文件（按运营商和频道类型两级分组）"""
         print(f"生成TXT文件: {output_path}")
@@ -1115,8 +1030,8 @@ class ISPProcessor:
                     if not channels:
                         continue
                     
-                    # 写入分组标题：运营商-频道类型
-                    f.write(f"{isp_group}-{channel_type},#genre#\n")
+                    # 写入分组标题：运营商/频道类型
+                    f.write(f"{isp_group}/{channel_type},#genre#\n")
                     
                     # 按频道名称合并多个URL
                     channel_dict = {}
@@ -1144,8 +1059,83 @@ class ISPProcessor:
                         
                         for channel in channel_urls:
                             f.write(f"{channel.name},{channel.url}\n")
+                
+                f.write("\n")
+    
+    def generate_m3u_file(self, grouped_channels, output_path):
+        """生成M3U格式的播放列表文件（按运营商和频道类型两级分组）"""
+        print(f"生成M3U文件: {output_path}")
+        
+        # 按运营商的优先级排序
+        isp_order = [
+            ISPGroup.CHINA_TELECOM,
+            ISPGroup.CHINA_UNICOM,
+            ISPGroup.CHINA_MOBILE,
+            ISPGroup.CHINA_RAILCOM,
+            ISPGroup.CERNET,
+            ISPGroup.BROADBAND,
+            ISPGroup.OTHER,
+            ISPGroup.UNKNOWN
+        ]
+        
+        # 按频道类型的优先级排序
+        channel_type_order = [
+            ChannelGroup.CCTV,
+            ChannelGroup.WEI_SHI,
+            ChannelGroup.HKMOTW,
+            ChannelGroup.LOCAL,
+            ChannelGroup.CITY,
+            ChannelGroup.OTHER
+        ]
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("#EXTM3U\n")
+            
+            for isp_group in isp_order:
+                if isp_group not in grouped_channels:
+                    continue
+                
+                # 检查该运营商是否有频道
+                has_channels = any(len(grouped_channels[isp_group][ct]) > 0 for ct in channel_type_order)
+                if not has_channels:
+                    continue
+                
+                for channel_type in channel_type_order:
+                    channels = grouped_channels[isp_group].get(channel_type, [])
+                    if not channels:
+                        continue
                     
-                    f.write("\n")
+                    # 按频道名称合并
+                    channel_dict = {}
+                    for channel in channels:
+                        if channel.name not in channel_dict:
+                            channel_dict[channel.name] = []
+                        channel_dict[channel.name].append(channel)
+                
+                    # 对于CCTV频道特殊排序
+                    if channel_type == ChannelGroup.CCTV:
+                        def cctv_sort_key(channel_name):
+                            match = re.search(r'CCTV(\d+)', channel_name, re.IGNORECASE)
+                            if match:
+                                return int(match.group(1))
+                            return 999
+                        sorted_channel_names = sorted(channel_dict.keys(), key=cctv_sort_key)
+                    else:
+                        sorted_channel_names = sorted(channel_dict.keys())
+                    
+                    # 写入每个频道的每个URL
+                    for channel_name in sorted_channel_names:
+                        channel_urls = channel_dict[channel_name]
+                        # 确保按速度排序（快到慢）
+                        channel_urls.sort(key=lambda x: x.speed, reverse=True)
+                        
+                        for channel in channel_urls:
+                            # 使用运营商/频道类型作为group-title
+                            f.write(f'#EXTINF:-1 group-title="{isp_group}/{channel_type}",{channel.name}\n')
+                            f.write(f'{channel.url}\n')
+    
+        print(f"M3U文件已生成，包含以下分组:")
+        self._print_group_statistics(grouped_channels)
     
     def generate_m3u_file_by_type(self, grouped_channels, output_path):
         """生成M3U格式的播放列表文件（仅按频道类型分组，类似unicast.py）"""
@@ -1169,23 +1159,14 @@ class ISPProcessor:
                 if not channels:
                     continue
                 
-                # 写入频道类型分组注释
-                f.write(f"\n# ========== {channel_type} ==========\n")
-                
                 # 写入该分组的所有频道
                 for channel in channels:
-                    # 生成频道信息行
-                    info_line = f"#EXTINF:-1"
-                    if hasattr(channel, 'speed') and channel.speed > 0:
-                        info_line += f" group-title=\"{channel_type}\",[{channel.speed:.2f}Mb/s] {channel.name}"
-                    else:
-                        info_line += f" group-title=\"{channel_type}\",{channel.name}"
-                    
-                    f.write(f"{info_line}\n")
-                    f.write(f"{channel.url}\n")
+                    # 生成频道信息行，与unicast.py格式完全一致
+                    f.write(f'#EXTINF:-1 group-title="{channel_type}",{channel.name}\n')
+                    f.write(f'{channel.url}\n')
     
     def generate_txt_file_by_type(self, grouped_channels, output_path):
-        """生成TXT格式的频道列表文件（仅按频道类型分组，类似unicast.py）"""
+        """生成TXT格式的播放列表文件（仅按频道类型分组，类似unicast.py）"""
         print(f"生成TXT文件: {output_path}")
         
         # 按频道类型的优先级排序
@@ -1199,10 +1180,6 @@ class ISPProcessor:
         ]
         
         with open(output_path, 'w', encoding='utf-8') as f:
-            # 写入文件头注释
-            f.write(f"# IPTV直播源列表（按频道类型分组）\n")
-            f.write(f"# 生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-            
             for channel_type in channel_type_order:
                 channels = grouped_channels.get(channel_type, [])
                 if not channels:
@@ -1215,7 +1192,7 @@ class ISPProcessor:
                 for channel in channels:
                     f.write(f"{channel.name},{channel.url}\n")
                 
-                f.write("\n")  # 分组间空行
+                f.write("\n")
     
     def _print_group_statistics_by_type(self, grouped_channels):
         """打印按频道类型分组的统计信息"""
