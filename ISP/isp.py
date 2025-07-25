@@ -67,32 +67,8 @@ class ISPProcessor:
     # URL列表（与unicast.py相同）
     URLS = [
         "https://live.zbds.org/tv/yd.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/anhui/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/fujian/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/guangxi/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/hebei/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/heilongjiang/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/henan/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/hubei/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/jiangxi/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/jiangsu/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shan3xi/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shandong/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/zhejiang/mobile.txt",
-        "https://mycode.zhoujie218.top/me/jsyd.txt",
-        "https://live.zbds.org/tv/zjyd.txt",
-        "https://live.zbds.org/tv/zjyd1.txt",
-        "https://live.zbds.org/tv/jxyd.txt",
-        "https://live.zbds.org/tv/sxyd.txt",
-        "https://vdyun.com/hbm3u.txt",
-        "https://vdyun.com/hbcm.txt",
-        "https://vdyun.com/hbcm1.txt",
-        "https://vdyun.com/hbcm2.txt",
-        "https://vdyun.com/sjzcm1.txt",
-        "https://vdyun.com/sjzcm2.txt",
-        "https://vdyun.com/hljcm.txt",
-        "https://vdyun.com/shxcm.txt",
-        "https://vdyun.com/shxcm1.txt"
+        "https://vdyun.com/ydall.txt",
+        "https://live.zbds.org/tv/iptv4.txt"
     ]
     
     # 频道分组关键词（参考unicast.py）
