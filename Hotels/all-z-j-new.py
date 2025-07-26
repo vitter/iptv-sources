@@ -340,7 +340,7 @@ def test_speed_and_output(channels, output_prefix="itvlist"):
                     numberx = (len(speed_results) + len(error_channels)) / len(channels) * 100
                     print(f"可用频道：{len(speed_results)} 个 , 不可用频道：{len(error_channels)} 个 , 总频道：{len(channels)} 个 ,总进度：{numberx:.2f} %。")
                     # 添加小延迟，减少网络压力
-                    time.sleep(0.1)
+                    #time.sleep(0.1)
             except:
                 error_channel = channel_name, channel_url
                 error_channels.append(error_channel)
