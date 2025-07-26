@@ -67,7 +67,7 @@ def generate_ip_range_urls(base_url, ip_address, port, suffix=None):
         urls.append(url)
     return urls
 
-def check_urls_concurrent(urls, timeout=1, max_workers=100, print_valid=True):
+def check_urls_concurrent(urls, timeout=1, max_workers=100, print_valid=True):  # 降低URL检测并发数
     """并发检测URL可用性，返回可用URL列表"""
     valid_urls = []
     def is_url_accessible(url):
@@ -313,7 +313,19 @@ def test_speed_and_output(channels, output_prefix="itvlist"):
                 ts_lists_0 = ts_lists[0].rstrip(ts_lists[0].split('.ts')[-1])
                 ts_url = channel_url_t + ts_lists[0]
                 start_time = time.time()
-                content = requests.get(ts_url, timeout=5).content
+                # 使用流式下载并限制最大下载大小（5MB）
+                response = requests.get(ts_url, timeout=5, stream=True)
+                content = b""
+                max_size = 5 * 1024 * 1024  # 5MB限制
+                downloaded_size = 0
+                
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        downloaded_size += len(chunk)
+                        if downloaded_size > max_size:
+                            break  # 超过5MB就停止下载
+                        content += chunk
+                
                 end_time = time.time()
                 response_time = (end_time - start_time) * 1
                 if content:
@@ -327,13 +339,15 @@ def test_speed_and_output(channels, output_prefix="itvlist"):
                     speed_results.append(result)
                     numberx = (len(speed_results) + len(error_channels)) / len(channels) * 100
                     print(f"可用频道：{len(speed_results)} 个 , 不可用频道：{len(error_channels)} 个 , 总频道：{len(channels)} 个 ,总进度：{numberx:.2f} %。")
+                    # 添加小延迟，减少网络压力
+                    time.sleep(0.1)
             except:
                 error_channel = channel_name, channel_url
                 error_channels.append(error_channel)
                 numberx = (len(speed_results) + len(error_channels)) / len(channels) * 100
                 print(f"可用频道：{len(speed_results)} 个 , 不可用频道：{len(error_channels)} 个 , 总频道：{len(channels)} 个 ,总进度：{numberx:.2f} %。")
             task_queue.task_done()
-    num_threads = 50
+    num_threads = 50  # 降低并发数，避免网络拥塞
     for _ in range(num_threads):
         t = threading.Thread(target=worker, daemon=True)
         t.start()
