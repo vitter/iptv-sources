@@ -7,7 +7,7 @@
 
 ```
 iptv-sources/
-├── Hotels/                    # IPTV服务器批量探测工具
+├── Hotels/                   # IPTV服务器批量探测工具
 ├── ISP/                      # 按运营商分组工具  
 ├── mobileunicast/            # 移动直播源处理工具
 └── udpxy/                    # udpxy代理搜索测速工具
