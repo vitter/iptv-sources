@@ -1,0 +1,13 @@
+.env
+*.log
+output/
+*_result_fofa_*.txt
+*_sum.ip
+*_uniq.ip
+tmp/
+sum/
+*.m3u
+downloads/
+*.tmp
+*_result.txt
+itvlist.txt
