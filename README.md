@@ -247,6 +247,7 @@ python speedtest_integrated_new.py Beijing Telecom
 - 准备CSV格式的服务器列表
 - 选择对应的服务器类型（jsmpeg/txiptv/zhgxtv）
 - 进行批量扫描和测速
+- 结合makecsv.py使用可生成更新CSV列表文件，通过FOFA和Quake360搜索
 
 ### 场景3: 按运营商维护源库
 **推荐工具**: `ISP`
