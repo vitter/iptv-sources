@@ -191,6 +191,7 @@ pip install urllib3 python-dotenv
 # Hotels工具额外依赖
 pip install aiohttp
 ```
+如遇依赖冲突或安装失败，请优先升级pip（python -m pip install --upgrade pip）或使用虚拟环境（推荐python -m venv venv）。
 
 ### 快速开始
 
@@ -309,8 +310,11 @@ curl -H "X-QuakeToken: $QUAKE360_TOKEN" "https://quake.360.cn/api/v3/user/info"
 
 ### 贡献指南
 1. Fork项目并创建特性分支
-2. 完成开发并添加必要测试
+2. 完成开发并添加必要测试，并在PR中附上相关测试用例或截图，便于review
 3. 提交Pull Request并描述修改内容
+
+### 开发文档
+如需详细API或代码说明，请查阅各子目录的README.md。
 
 ## 📄 许可证
 
@@ -319,6 +323,7 @@ curl -H "X-QuakeToken: $QUAKE360_TOKEN" "https://quake.360.cn/api/v3/user/info"
 ## ⚠️ 免责声明
 
 - 本工具集仅供学习和技术研究使用
+- 请勿用于商业用途或非法用途
 - 使用前请确保遵守相关网站的使用条款和法律法规
 - 请合理使用API接口，避免对服务提供商造成负担
 - 作者不对使用工具可能产生的任何问题承担责任
@@ -331,7 +336,7 @@ curl -H "X-QuakeToken: $QUAKE360_TOKEN" "https://quake.360.cn/api/v3/user/info"
 
 ---
 
-**最后更新**: 2025年7月29日  
+**最后更新**: 2025年7月31日  
 **当前版本**: v2.0  
 **维护状态**: 积极维护中
 
