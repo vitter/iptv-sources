@@ -66,16 +66,7 @@ class UnicastProcessor:
         "https://live.zbds.org/tv/zjyd.txt",
         "https://live.zbds.org/tv/zjyd1.txt",
         "https://live.zbds.org/tv/jxyd.txt",
-        "https://live.zbds.org/tv/sxyd.txt",
-        "https://vdyun.com/hbm3u.txt",
-        "https://vdyun.com/hbcm.txt",
-        "https://vdyun.com/hbcm1.txt",
-        "https://vdyun.com/hbcm2.txt",
-        "https://vdyun.com/sjzcm1.txt",
-        "https://vdyun.com/sjzcm2.txt",
-        "https://vdyun.com/hljcm.txt",
-        "https://vdyun.com/shxcm.txt",
-        "https://vdyun.com/shxcm1.txt"
+        "https://live.zbds.org/tv/sxyd.txt"
     ]
     
     # 分组关键字
