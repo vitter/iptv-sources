@@ -62,6 +62,8 @@ class UnicastProcessor:
         "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shan3xi/mobile.txt",
         "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shandong/mobile.txt",
         "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/zhejiang/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shanghai/mobile.txt",
+        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/liaoning/mobile.txt",
         "https://mycode.zhoujie218.top/me/jsyd.txt",
         "https://live.zbds.org/tv/zjyd.txt",
         "https://live.zbds.org/tv/zjyd1.txt",
