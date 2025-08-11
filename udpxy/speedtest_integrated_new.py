@@ -54,13 +54,14 @@ except ImportError:
 class IPTVSpeedTest:
     """IPTV 测速主类"""
     
-    def __init__(self, region, isp, max_pages=10):
+    def __init__(self, region, isp, max_pages=10, notest=False):
         # 加载环境变量
         load_dotenv()
         
         self.region = self._format_string(region)
         self.isp = self._format_string(isp)
         self.max_pages = max_pages  # 新增：最大翻页数限制
+        self.notest = notest  # 新增：是否跳过流媒体测试
         
         # 从环境变量读取配置并清理格式
         self.quake360_token = os.getenv('QUAKE360_TOKEN')
@@ -79,8 +80,13 @@ class IPTVSpeedTest:
         # 创建必要的目录
         self._create_directories()
         
-        # 加载省份配置
-        self.city, self.stream = self._load_province_config()
+        # 加载省份配置（仅在需要流媒体测试时加载）
+        if not self.notest:
+            self.city, self.stream = self._load_province_config()
+        else:
+            # 在notest模式下，使用region作为city，stream设为空
+            self.city = self.region
+            self.stream = ""
         
         # 设置输出文件路径
         self.output_dir = Path(f"sum/{self.isp}")
@@ -209,9 +215,34 @@ class IPTVSpeedTest:
             'Sec-Fetch-User': '?1'
         })
         
-        # 单独设置Cookie头，确保格式正确
+        # 单独设置Cookie头，确保格式正确，处理编码问题
         if self.fofa_cookie:
-            session.headers['Cookie'] = self.fofa_cookie
+            try:
+                # 确保Cookie字符串是正确编码的
+                if isinstance(self.fofa_cookie, bytes):
+                    cookie_str = self.fofa_cookie.decode('utf-8')
+                else:
+                    cookie_str = str(self.fofa_cookie)
+                
+                # 检查Cookie中是否包含非ASCII字符，如果有则进行URL编码
+                try:
+                    cookie_str.encode('ascii')
+                    # 如果没有异常，说明是纯ASCII，直接使用
+                    session.headers['Cookie'] = cookie_str
+                except UnicodeEncodeError:
+                    # 包含非ASCII字符，进行URL编码处理
+                    print("检测到Cookie中包含非ASCII字符，进行编码处理")
+                    import urllib.parse
+                    # 对Cookie值进行URL编码
+                    encoded_cookie = urllib.parse.quote(cookie_str, safe='=; ')
+                    session.headers['Cookie'] = encoded_cookie
+                    print("Cookie编码处理完成")
+                    
+            except Exception as e:
+                print(f"Cookie处理错误: {e}")
+                print("将跳过Cookie设置，仅使用API方式")
+                # 清空cookie，避免后续使用
+                self.fofa_cookie = None
         
         return session
     
@@ -255,6 +286,9 @@ class IPTVSpeedTest:
             
             response = session.get(api_url, params=params, timeout=30)
             response.raise_for_status()
+            
+            # 明确设置响应编码为UTF-8
+            response.encoding = 'utf-8'
             
             print(f"响应状态码: {response.status_code}")
             
@@ -302,6 +336,9 @@ class IPTVSpeedTest:
                     try:
                         response = session.get(api_url, params=params, timeout=30)
                         response.raise_for_status()
+                        
+                        # 明确设置响应编码为UTF-8
+                        response.encoding = 'utf-8'
                         
                         response_json = response.json()
                         
@@ -401,6 +438,9 @@ class IPTVSpeedTest:
             response = session.get(first_url, timeout=30)
             response.raise_for_status()
             
+            # 明确设置响应编码为UTF-8
+            response.encoding = 'utf-8'
+            
             print(f"响应状态码: {response.status_code}")
             print(f"响应内容长度: {len(response.text)} 字符")
             
@@ -445,6 +485,9 @@ class IPTVSpeedTest:
                         response = session.get(page_url, timeout=30)
                         response.raise_for_status()
                         
+                        # 明确设置响应编码为UTF-8
+                        response.encoding = 'utf-8'
+                        
                         # 检查响应是否有效
                         if '[-3000]' in response.text:
                             print(f"第{page}页被拒绝访问 [-3000]")
@@ -487,9 +530,23 @@ class IPTVSpeedTest:
             return list(set(all_ip_ports))  # 返回已获取的去重结果
         except requests.exceptions.RequestException as e:
             print(f"FOFA请求失败: {e}")
+            print(f"错误类型: {type(e).__name__}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"响应状态码: {e.response.status_code}")
+                print(f"响应头: {dict(e.response.headers)}")
+            return []
+        except UnicodeEncodeError as e:
+            print(f"FOFA搜索编码错误: {e}")
+            print(f"错误发生在: 编码 '{e.object[e.start:e.end]}' 使用 '{e.encoding}' 编码")
+            print("这通常是由于Cookie中包含了非ASCII字符导致的")
+            print("建议检查FOFA_COOKIE环境变量中是否包含中文字符")
             return []
         except Exception as e:
             print(f"FOFA搜索异常: {e}")
+            print(f"错误类型: {type(e).__name__}")
+            import traceback
+            print("错误堆栈:")
+            traceback.print_exc()
             return []
     
     def _extract_fofa_page_info(self, content):
@@ -647,7 +704,7 @@ class IPTVSpeedTest:
         """从 FOFA 搜索 IP - 优先使用API，回退到Cookie"""
         # 根据运营商类型构建搜索查询（简化为单个查询）
         if self.isp.lower() == 'mobile':
-            query = f'"udpxy" && country="CN" && region="{self.region}" && (org="{self.region} Mobile Communication Company Limited" || org="{self.region} Mobile Communications Co." || org="China Mobile Communicaitons Corporation" || org="China Mobile Group {self.region} communications corporation" || org="China Mobile Group {self.region} Co.") && protocol="http"'
+            query = f'"udpxy" && country="CN" && region="{self.region}" && (org="{self.region} Mobile Communication Company Limited" || org="{self.region} Mobile Communications Co." || org="China Mobile Communicaitons Corporation" || org="China Mobile communications corporation" || org="China Mobile Communications Group Co., Ltd." || org="{self.region} Mobile Communications Co.,Ltd." || org="{self.region} Mobile Communications Co.,Ltd" || org="China Mobile Group {self.region} communications corporation" || org="China Mobile Group {self.region} Co.") && protocol="http"'
         elif self.isp.lower() == 'telecom':
             query = f'"udpxy" && country="CN" && region="{self.region}" && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group" || org="{self.region} Telecom" || org="CHINANET {self.region} province network" || org="CHINANET {self.region} province backbone") && protocol="http"'
         elif self.isp.lower() == 'unicom':
@@ -1450,6 +1507,45 @@ class IPTVSpeedTest:
         except Exception as e:
             print(f"合并模板文件失败: {e}")
     
+    def _save_basic_results(self, udpxy_ips):
+        """保存基本的IP检测结果（不进行流媒体测试时使用）"""
+        try:
+            # 确保输出目录存在
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 保存所有找到的udpxy IP到sum文件
+            with open(self.ipfile_sum, 'w', encoding='utf-8') as f:
+                for ip in udpxy_ips:
+                    # 保存实际的IP:PORT格式
+                    f.write(f"{ip}\n")
+            print(f"保存 {len(udpxy_ips)} 个udpxy服务器到: {self.ipfile_sum}")
+            
+            # 也保存到uniq文件（去重文件）
+            with open(self.ipfile_uniq, 'w', encoding='utf-8') as f:
+                unique_ips = list(set(udpxy_ips))
+                for ip in unique_ips:
+                    # 保存实际的IP:PORT格式
+                    f.write(f"{ip}\n")
+            print(f"保存 {len(unique_ips)} 个唯一udpxy服务器到: {self.ipfile_uniq}")
+            
+            # 保存简单的结果报告
+            report_file = self.output_dir / f"{self.city}_basic_report.txt"
+            with open(report_file, 'w', encoding='utf-8') as f:
+                f.write(f"UDPXY服务器搜索报告\n")
+                f.write(f"地区: {self.region}\n")
+                f.write(f"运营商: {self.isp}\n")
+                f.write(f"搜索时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"找到的udpxy服务器数量: {len(udpxy_ips)}\n")
+                f.write(f"唯一服务器数量: {len(set(udpxy_ips))}\n")
+                f.write(f"\n服务器列表:\n")
+                for ip in udpxy_ips:
+                    # 保存实际的IP:PORT格式
+                    f.write(f"{ip}\n")
+            print(f"保存基本报告到: {report_file}")
+            
+        except Exception as e:
+            print(f"保存基本结果失败: {e}")
+    
     def cleanup(self):
         """清理临时文件"""
         temp_files = [
@@ -1467,7 +1563,10 @@ class IPTVSpeedTest:
         """运行完整的测试流程"""
         try:
             print(f"开始为 {self.region} {self.isp} 搜索和测试 IP")
-            print(f"城市: {self.city}, 流地址: {self.stream}")
+            if not self.notest:
+                print(f"城市: {self.city}, 流地址: {self.stream}")
+            else:
+                print("跳过流媒体测试模式")
             
             # 1. 搜索 IP
             fofa_ips = self.search_fofa_ips()
@@ -1490,13 +1589,22 @@ class IPTVSpeedTest:
                 print("没有找到可用的udpxy服务器，程序退出")
                 return
             
-            # 3. 运行速度测试（只测试udpxy服务器）
-            speed_results = self.run_speed_tests(udpxy_ips)
-            
-            # 4. 生成结果
-            self.generate_results(speed_results)
-            
-            print("-----------------测速完成----------------")
+            if self.notest:
+                # 只进行IP搜索和端口检测，不进行流媒体测试
+                print(f"发现 {len(udpxy_ips)} 个可用的udpxy服务器")
+                print("跳过流媒体测试和模板生成")
+                
+                # 保存基本结果
+                self._save_basic_results(udpxy_ips)
+                print("-----------------搜索完成----------------")
+            else:
+                # 3. 运行速度测试（只测试udpxy服务器）
+                speed_results = self.run_speed_tests(udpxy_ips)
+                
+                # 4. 生成结果
+                self.generate_results(speed_results)
+                
+                print("-----------------测速完成----------------")
             
         except KeyboardInterrupt:
             print("\n用户中断程序")
@@ -1518,8 +1626,13 @@ def main():
   python speedtest_integrated_new.py Beijing Unicom
   python speedtest_integrated_new.py Guangzhou Mobile
   python speedtest_integrated_new.py Shanghai Telecom --max-pages 5
+  python speedtest_integrated_new.py Beijing Mobile --notest
 
 运营商可选: Telecom, Unicom, Mobile
+
+参数说明:
+  --max-pages: 限制搜索的最大页数
+  --notest: 跳过流媒体测试，仅进行IP搜索和端口检测
         """
     )
     
@@ -1527,6 +1640,8 @@ def main():
     parser.add_argument('isp', help='运营商 (Telecom/Unicom/Mobile)')
     parser.add_argument('--max-pages', type=int, default=10, 
                        help='最大翻页数限制 (默认: 10页)')
+    parser.add_argument('--notest', action='store_true',
+                       help='跳过流媒体测试和模板生成，仅进行IP搜索和端口检测')
     
     args = parser.parse_args()
     
@@ -1553,9 +1668,13 @@ def main():
     print(f"  地区: {args.region}")
     print(f"  运营商: {args.isp}")
     print(f"  最大翻页数: {args.max_pages}")
+    if args.notest:
+        print(f"  模式: 仅搜索模式（跳过流媒体测试）")
+    else:
+        print(f"  模式: 完整测试模式")
     
     # 创建测试实例并运行
-    speedtest = IPTVSpeedTest(args.region, args.isp, args.max_pages)
+    speedtest = IPTVSpeedTest(args.region, args.isp, args.max_pages, args.notest)
     speedtest.run()
 
 

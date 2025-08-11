@@ -10,3 +10,5 @@ Shandong Shandong udp/239.21.1.120:5002
 Guangdong Guangdong udp/239.77.1.17:5146
 Zhejiang Zhejiang udp/233.50.201.118:5140
 Hunan Hunan udp/239.76.253.151:9000
+Beijing Beijing udp/225.1.8.1:8008
+Tianjin Tianjin udp/239.5.1.4:5000

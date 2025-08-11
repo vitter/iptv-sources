@@ -1,6 +1,7 @@
 city file stream
-Shanghai Shanghai_103 udp/238.200.200.130:5540
+Shanghai Shanghai udp/238.200.200.133:5540
 Hebei Hebei udp/239.253.92.83:8012
 Shanxi Shanxi udp/226.0.2.153:9136
 Heilongjiang Heilongjiang udp/229.58.190.151:5000
 Beijing Beijing udp/239.3.1.129:8008
+Tianjin Tianjin udp/225.1.1.120:5002
