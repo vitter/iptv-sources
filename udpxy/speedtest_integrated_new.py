@@ -704,6 +704,7 @@ class IPTVSpeedTest:
         """从 FOFA 搜索 IP - 优先使用API，回退到Cookie"""
         # 根据运营商类型构建搜索查询（简化为单个查询）
         if self.isp.lower() == 'mobile':
+            #query = f'"udpxy" && country="CN" && region="{self.region}" && org*="*obile*" && protocol="http"'
             query = f'"udpxy" && country="CN" && region="{self.region}" && (org="{self.region} Mobile Communication Company Limited" || org="{self.region} Mobile Communications Co." || org="China Mobile Communicaitons Corporation" || org="China Mobile communications corporation" || org="China Mobile Communications Group Co., Ltd." || org="{self.region} Mobile Communications Co.,Ltd." || org="{self.region} Mobile Communications Co.,Ltd" || org="China Mobile Group {self.region} communications corporation" || org="China Mobile Group {self.region} Co.") && protocol="http"'
         elif self.isp.lower() == 'telecom':
             query = f'"udpxy" && country="CN" && region="{self.region}" && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group" || org="{self.region} Telecom" || org="CHINANET {self.region} province network" || org="CHINANET {self.region} province backbone") && protocol="http"'

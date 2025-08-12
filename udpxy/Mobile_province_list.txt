@@ -4,3 +4,6 @@ Hebei Hebei udp/239.255.2.2:8000
 Beijing Beijing udp/228.1.1.28:8008
 Tianjin Tianjin udp/225.2.1.120:5000
 Shanxi Shanxi udp/226.0.1.157:3086
+Henan Henan udp/225.1.4.73:1102
+Guangdong Guangdong udp/239.77.0.30:5146
+Sichuan Sichuan udp/239.11.0.65:5140
