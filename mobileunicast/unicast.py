@@ -11,6 +11,7 @@ IPTV直播源下载、合并、测速与分组工具
 
 用法：
 python unicast.py --top 20
+python unicast.py --top 20 --proxy http://127.0.0.1:10808
 """
 
 import os
@@ -68,7 +69,17 @@ class UnicastProcessor:
         "https://live.zbds.org/tv/zjyd.txt",
         "https://live.zbds.org/tv/zjyd1.txt",
         "https://live.zbds.org/tv/jxyd.txt",
-        "https://live.zbds.org/tv/sxyd.txt"
+        "https://live.zbds.org/tv/sxyd.txt",
+        "https://vdyun.com/hbm3u.txt",
+        "https://vdyun.com/hbcm.txt",
+        "https://vdyun.com/hbcm1.txt",
+        "https://vdyun.com/hbcm2.txt",
+        "https://vdyun.com/sjzcm1.txt",
+        "https://vdyun.com/sjzcm2.txt",
+        "https://vdyun.com/hljcm.txt",
+        "https://vdyun.com/shxcm.txt",
+        "https://vdyun.com/shxcm1.txt"
+
     ]
     
     # 分组关键字
@@ -110,8 +121,9 @@ class UnicastProcessor:
 "银川", "石嘴山", "吴忠", "固原", "中卫",
 "乌鲁木齐", "克拉玛依", "吐鲁番", "哈密", "昌吉回族自治州", "博尔塔拉蒙古自治州", "巴音郭楞蒙古自治州", "阿克苏地区", "克孜勒苏柯尔克孜自治州", "喀什地区", "和田地区", "伊犁哈萨克自治州", "塔城地区", "阿勒泰地区")
     
-    def __init__(self, top_count=20):
+    def __init__(self, top_count=20, proxy=None):
         self.top_count = top_count
+        self.proxy = proxy
         self.download_dir = Path("downloads")
         self.output_dir = Path("output")
         self.temp_file = Path("txt.tmp")  # 汇总临时文件
@@ -126,6 +138,8 @@ class UnicastProcessor:
     def download_files(self):
         """下载所有txt文件"""
         print("开始下载直播源文件...")
+        if self.proxy:
+            print(f"使用代理: {self.proxy}")
         
         def download_single_file(url):
             try:
@@ -133,7 +147,15 @@ class UnicastProcessor:
                 filename = self._generate_unique_filename(url)
                 filepath = self.download_dir / filename
                 
-                response = requests.get(url, timeout=30, headers={
+                # 设置代理
+                proxies = {}
+                if self.proxy:
+                    proxies = {
+                        'http': self.proxy,
+                        'https': self.proxy
+                    }
+                
+                response = requests.get(url, timeout=30, proxies=proxies, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
                 response.raise_for_status()
@@ -788,13 +810,16 @@ def main():
     parser.add_argument('--top', type=int, default=20,
                        help='每个频道最多保留速度最快的前N个URL源 (默认: 20)')
     
+    parser.add_argument('--proxy', type=str, default=None,
+                       help='代理服务器地址，格式：http://127.0.0.1:10808 (仅用于下载URL列表)')
+    
     args = parser.parse_args()
     
     if args.top < 1:
         print("错误: --top 参数必须大于0")
         sys.exit(1)
     
-    processor = UnicastProcessor(top_count=args.top)
+    processor = UnicastProcessor(top_count=args.top, proxy=args.proxy)
     processor.run()
 
 
