@@ -11,3 +11,5 @@ downloads/
 *.tmp
 *_result.txt
 itvlist.txt
+multicast_sources/
+generated_sources/
