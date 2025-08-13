@@ -2,10 +2,13 @@
 """
 IPTV(udpxy) IP 搜索与测速综合工具 - 新版本
 
-使用FOFA API 或登录Cookie进行搜索，Quake360使用Token认证
+使用FOFA API 或登录Cookie进行搜索，Quake360使用Token认证，ZoomEye使用API Key认证
 
 功能：
-1. 从 FOFA 和 Quake360 搜索 udpxy IP（FOFA支持API密钥和Cookie认证，Quake360使用Token认证）
+1. 从 FOFA、Quake360 和 ZoomEye 搜索 udpxy IP
+   - FOFA支持API密钥和Cookie认证
+   - Quake360使用Token认证
+   - ZoomEye使用API Key认证
 2. 端口连通性测试
 3. HTTP/M3U8 流媒体测速
 4. 生成结果文件
@@ -17,7 +20,8 @@ python speedtest_integrated_new.py <省市> <运营商>
 认证方式：
 - FOFA：配置了FOFA_API_KEY时优先使用API方式，失败时回退到Cookie；未配置则使用Cookie方式
 - Quake360：使用QUAKE360_TOKEN进行API认证
-- FOFA 必须配置Cookie，QUAKE360必须配置Token
+- ZoomEye：使用ZOOMEYE_API_KEY进行API认证
+- FOFA 必须配置Cookie，QUAKE360和ZoomEye可选配置（未配置时跳过对应搜索引擎）
 - 支持多线程加速搜索和测速
 
 注意事项：
@@ -67,6 +71,7 @@ class IPTVSpeedTest:
         self.quake360_token = os.getenv('QUAKE360_TOKEN')
         self.fofa_user_agent = os.getenv('FOFA_USER_AGENT')
         self.fofa_api_key = os.getenv('FOFA_API_KEY', '')  # 可选的API密钥
+        self.zoomeye_api_key = os.getenv('ZOOMEYE_API_KEY', '')  # ZoomEye API密钥
         
         # 清理Cookie字符串 - 移除换行符、回车符和多余空格
         raw_fofa_cookie = os.getenv('FOFA_COOKIE', '')
@@ -140,6 +145,7 @@ class IPTVSpeedTest:
         print("配置状态:")
         print(f"  FOFA Cookie: ✓")
         print(f"  Quake360 Token: {'✓' if self.quake360_token else '✗'}")
+        print(f"  ZoomEye API Key: {'✓' if self.zoomeye_api_key else '✗'}")
         
         # 检查FOFA认证方式
         if self.fofa_api_key:
@@ -149,6 +155,12 @@ class IPTVSpeedTest:
             
         # Quake360使用Token认证
         print("  → Quake360 将使用 Token 认证")
+        
+        # ZoomEye使用API Key认证
+        if self.zoomeye_api_key:
+            print("  → ZoomEye 将使用 API Key 认证")
+        else:
+            print("  → ZoomEye 未配置，将跳过ZoomEye搜索")
     
     def _create_directories(self):
         """创建必要的目录"""
@@ -937,6 +949,192 @@ class IPTVSpeedTest:
         
         return ip_ports
     
+    def search_zoomeye_ips(self):
+        """从 ZoomEye 搜索 IP - 使用API Key认证"""
+        print(f"===============从 ZoomEye 检索 IP ({self.region})=================")
+        
+        if not self.zoomeye_api_key:
+            print("❌ 未配置ZOOMEYE_API_KEY，跳过ZoomEye搜索")
+            return []
+        
+        print("🔑 使用 ZoomEye API Key 方式搜索")
+        return self.search_zoomeye_api()
+    
+    def search_zoomeye_api(self):
+        """从 ZoomEye 搜索 IP - API方式，支持翻页获取多页数据"""
+        print("--- ZoomEye API 搜索 ---")
+        
+        # 根据运营商类型构建搜索查询
+        if self.isp.lower() == 'telecom':
+            query = f'app="udpxy" && country="CN" && isp="China Telecom" && subdivisions="{self.region}"'
+        elif self.isp.lower() == 'unicom':
+            query = f'app="udpxy" && country="CN" && isp="China Unicom" && subdivisions="{self.region}"'
+        elif self.isp.lower() == 'mobile':
+            query = f'app="udpxy" && country="CN" && isp="China Mobile" && subdivisions="{self.region}"'
+        else:
+            # 默认查询
+            query = f'app="udpxy" && country="CN" && subdivisions="{self.region}"'
+        
+        print(f"查询参数: {query}")
+        print(f"最大翻页数限制: {self.max_pages} 页")
+        
+        # 将查询转换为base64编码
+        query_b64 = base64.b64encode(query.encode()).decode().replace('\n', '')
+        
+        all_ip_ports = []
+        
+        # 构建请求头
+        headers = {
+            'API-KEY': self.zoomeye_api_key,
+            'Content-Type': 'application/json',
+            'User-Agent': self.fofa_user_agent
+        }
+        
+        try:
+            print("发送第一次请求获取总数据量...")
+            # 添加延迟避免API限流
+            time.sleep(2)
+            
+            # 第一次请求，获取总数据量
+            request_data = {
+                "qbase64": query_b64,
+                "page": 1,
+                "pagesize": 10,  # 每页10条数据
+                "sub_type": "v4",  # IPv4数据
+                "fields": "ip,port,domain,update_time"  # 指定返回字段
+            }
+            
+            response = requests.post(
+                'https://api.zoomeye.org/v2/search',
+                headers=headers,
+                json=request_data,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            print(f"API响应状态码: {response.status_code}")
+            
+            # 解析JSON响应
+            response_json = response.json()
+            
+            # 检查API错误
+            code = response_json.get('code')
+            if code and str(code) != '60000':  # ZoomEye成功响应码是60000
+                error_message = response_json.get('message', '未知错误')
+                print(f"ZoomEye API错误: {code} - {error_message}")
+                return []
+            
+            # 获取总数据量
+            total_count = response_json.get('total', 0)
+            query_info = response_json.get('query', '')
+            
+            print(f"总数据量: {total_count}")
+            print(f"查询语句: {query_info}")
+            
+            # 计算总页数
+            page_size = 10  # ZoomEye每页固定10条
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1  # 向上取整
+            
+            # 应用最大页数限制
+            actual_pages = min(total_pages, self.max_pages)
+            print(f"总页数: {total_pages}, 实际获取页数: {actual_pages}")
+            
+            # 处理第一页数据
+            first_page_data = response_json.get('data', [])
+            page_ip_ports = self._extract_zoomeye_results(first_page_data)
+            all_ip_ports.extend(page_ip_ports)
+            print(f"第1页提取到 {len(page_ip_ports)} 个IP:PORT")
+            
+            # 如果有多页，继续获取其他页的数据
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
+                    
+                    # 更新页码参数
+                    request_data['page'] = page
+                    
+                    # 添加延迟避免API限流
+                    time.sleep(2)
+                    
+                    try:
+                        response = requests.post(
+                            'https://api.zoomeye.org/v2/search',
+                            headers=headers,
+                            json=request_data,
+                            timeout=30
+                        )
+                        response.raise_for_status()
+                        
+                        response_json = response.json()
+                        
+                        # 检查错误
+                        code = response_json.get('code')
+                        if code and str(code) != '60000':
+                            error_message = response_json.get('message', '未知错误')
+                            print(f"第{page}页ZoomEye API错误: {code} - {error_message}")
+                            continue
+                        
+                        page_data = response_json.get('data', [])
+                        page_ip_ports = self._extract_zoomeye_results(page_data)
+                        all_ip_ports.extend(page_ip_ports)
+                        print(f"第{page}页提取到 {len(page_ip_ports)} 个IP:PORT")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
+            
+            # 去重结果
+            unique_ips = list(set(all_ip_ports))
+            
+            print(f"ZoomEye API总共提取到 {len(all_ip_ports)} 个IP:PORT")
+            print(f"去重后共 {len(unique_ips)} 个唯一IP")
+            
+            if unique_ips:
+                # 显示前10个IP
+                print("提取到的IP地址:")
+                for ip in unique_ips[:10]:
+                    print(f"  {ip}")
+                if len(unique_ips) > 10:
+                    print(f"  ... 还有 {len(unique_ips) - 10} 个")
+                
+                return unique_ips
+            else:
+                print("ZoomEye API未找到有效的IP地址")
+                return []
+                
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_ip_ports)} 个结果")
+            return list(set(all_ip_ports))  # 返回已获取的去重结果
+        except requests.exceptions.RequestException as e:
+            print(f"ZoomEye API请求失败: {e}")
+            return []
+        except Exception as e:
+            print(f"ZoomEye API搜索异常: {e}")
+            return []
+    
+    def _extract_zoomeye_results(self, data_list):
+        """提取ZoomEye搜索结果数据"""
+        ip_ports = []
+        
+        for item in data_list:
+            if isinstance(item, dict):
+                # 提取IP地址
+                ip = item.get('ip')
+                # 提取端口
+                port = item.get('port')
+                
+                # 组合IP:PORT
+                if ip and port:
+                    # 确保IP是有效的IP地址格式
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
+                        ip_port = f"{ip}:{port}"
+                        ip_ports.append(ip_port)
+        
+        return ip_ports
+    
         
     def test_port_connectivity(self, ip_port, timeout=2):
         """测试端口连通性"""
@@ -1572,10 +1770,14 @@ class IPTVSpeedTest:
             # 1. 搜索 IP
             fofa_ips = self.search_fofa_ips()
             quake_ips = self.search_quake360_ips()
+            zoomeye_ips = self.search_zoomeye_ips()
             
             # 合并并去重
-            all_ips = list(set(fofa_ips + quake_ips))
-            print(f"从FOFA和Quake360总共找到 {len(all_ips)} 个唯一 IP")
+            all_ips = list(set(fofa_ips + quake_ips + zoomeye_ips))
+            print(f"从FOFA、Quake360和ZoomEye总共找到 {len(all_ips)} 个唯一 IP")
+            print(f"  FOFA: {len(fofa_ips)} 个")
+            print(f"  Quake360: {len(quake_ips)} 个") 
+            print(f"  ZoomEye: {len(zoomeye_ips)} 个")
             
             if not all_ips:
                 print("未找到任何 IP，程序退出")
