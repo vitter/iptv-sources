@@ -51,22 +51,23 @@ class UnicastProcessor:
     # URL列表
     URLS = [
         "https://live.zbds.org/tv/yd.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/anhui/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/fujian/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/guangxi/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/hebei/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/heilongjiang/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/henan/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/hubei/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/jiangxi/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/jiangsu/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shan3xi/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shandong/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/zhejiang/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/shanghai/mobile.txt",
-        "https://raw.githubusercontent.com/xisohi/CHINA-IPTV/main/Unicast/liaoning/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/anhui/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/fujian/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/guangxi/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/hebei/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/heilongjiang/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/henan/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/hubei/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/jiangxi/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/jiangsu/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/shan3xi/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/shandong/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/zhejiang/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/shanghai/mobile.txt",
+        "https://chinaiptv.pages.dev/Unicast/liaoning/mobile.txt",
         "https://mycode.zhoujie218.top/me/jsyd.txt",
         "https://raw.githubusercontent.com/q1017673817/iptv_zubo/refs/heads/main/hnyd.txt",
+        "https://live.zbds.org/tv/iptv6.txt",
         "https://live.zbds.org/tv/zjyd.txt",
         "https://live.zbds.org/tv/zjyd1.txt",
         "https://live.zbds.org/tv/jxyd.txt",
@@ -75,6 +76,8 @@ class UnicastProcessor:
         "https://vdyun.com/hbcm.txt",
         "https://vdyun.com/hbcm1.txt",
         "https://vdyun.com/hbcm2.txt",
+        "https://vdyun.com/yd.txt",
+        "https://vdyun.com/ipv6.txt",
         "https://vdyun.com/sjzcm1.txt",
         "https://vdyun.com/sjzcm2.txt",
         "https://vdyun.com/hljcm.txt",
@@ -826,6 +829,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
