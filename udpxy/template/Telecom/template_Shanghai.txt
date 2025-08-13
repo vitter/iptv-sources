@@ -105,9 +105,3 @@ CGTN,http://ipipip/udp/239.45.1.194:5140
 高一年级,http://ipipip/udp/239.45.1.37:5140
 高二年级,http://ipipip/udp/239.45.1.38:5140
 高三年级,http://ipipip/udp/239.45.1.39:5140
-
-
-
-
-
-
