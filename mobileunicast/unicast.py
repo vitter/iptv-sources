@@ -78,6 +78,7 @@ class UnicastProcessor:
         "https://vdyun.com/hbcm1.txt",
         "https://vdyun.com/hbcm2.txt",
         "https://vdyun.com/yd.txt",
+        "https://vdyun.com/yd1.txt",
         "https://vdyun.com/yd2.txt",
         "https://vdyun.com/ipv6.txt",
         "https://vdyun.com/sjzcm1.txt",
@@ -830,6 +831,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
