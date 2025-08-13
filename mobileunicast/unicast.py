@@ -67,6 +67,7 @@ class UnicastProcessor:
         "https://chinaiptv.pages.dev/Unicast/liaoning/mobile.txt",
         "https://mycode.zhoujie218.top/me/jsyd.txt",
         "https://raw.githubusercontent.com/q1017673817/iptv_zubo/refs/heads/main/hnyd.txt",
+        "https://raw.githubusercontent.com/suxuang/myIPTV/refs/heads/main/%E7%A7%BB%E5%8A%A8%E4%B8%93%E4%BA%AB.txt",
         "https://live.zbds.org/tv/iptv6.txt",
         "https://live.zbds.org/tv/zjyd.txt",
         "https://live.zbds.org/tv/zjyd1.txt",
@@ -829,6 +830,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
