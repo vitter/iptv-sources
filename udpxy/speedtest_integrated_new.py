@@ -837,10 +837,10 @@ class IPTVSpeedTest:
         query_data = {
             "query": query,
             "start": 0,
-            "size": 10,  # 每页100条数据
+            "size": 10,  # 每页10条数据
             "ignore_cache": False,
             "latest": True,
-            "shortcuts": "635fcb52cc57190bd8826d09"
+            "shortcuts": ["635fcb52cc57190bd8826d09"]
         }
         
         headers = {

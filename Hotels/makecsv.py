@@ -780,7 +780,6 @@ class IPTVSourceCollector:
     def search_quake360_api(self, query):
         """使用Quake360 API搜索，支持翻页获取全部数据"""
         print(f"===============从 Quake360 API 搜索===============")
-        print(f"搜索查询: {query}")
         
         if not self.quake360_token:
             print("未配置QUAKE360_TOKEN，跳过Quake360搜索")
@@ -789,19 +788,20 @@ class IPTVSourceCollector:
         # 获取时间范围参数
         start_time, end_time = self._get_quake360_time_range(self.days)
         print(f"360 Quake时间范围: {start_time} 到 {end_time} ({self.days}天)")
+        print(f"搜索查询: {query}")
         
         all_extracted_data = []
         
         # 第一次请求，获取总数据量
         query_data = {
-            "query": query,
+            "query": query,  # 基础查询语句
             "start": 0,
             "size": 100,  # 每页100条数据
             "ignore_cache": False,
             "latest": True,
-            "shortcuts": "635fcb52cc57190bd8826d09",  # 排除蜜罐系统结果
-            "start_time": start_time,  # 添加开始时间
-            "end_time": end_time       # 添加结束时间
+            "shortcuts": ["635fcb52cc57190bd8826d09"],  # 排除蜜罐系统结果
+            "start_time": start_time,  # 查询起始时间，格式：2020-10-14 00:00:00，UTC时区
+            "end_time": end_time       # 查询截止时间，格式：2020-10-14 00:00:00，UTC时区
         }
         
         headers = {
@@ -860,8 +860,8 @@ class IPTVSourceCollector:
                     # 更新分页参数
                     query_data['start'] = (page - 1) * page_size
                     
-                    # 添加延迟避免API限流
-                    time.sleep(2)
+                    # 添加延迟避免API限流 - 增加到5秒避免q3005错误
+                    time.sleep(5)
                     
                     try:
                         response = requests.post(
@@ -907,17 +907,21 @@ class IPTVSourceCollector:
         """提取Quake360搜索结果数据"""
         extracted_data = []
         
-        # 添加调试信息
+        # 添加调试信息 - 只显示关键字段
         if data_list:
             print(f"Quake360 API返回结果示例:")
             for i, item in enumerate(data_list[:3]):  # 只显示前3个
-                print(f"  结果 {i+1}: {item}")
+                ip = item.get('ip', 'N/A')
+                port = item.get('port', 'N/A')
+                org = item.get('org', 'N/A')
+                print(f"  结果 {i+1}: IP={ip}, Port={port}, Org={org}")
         
         for item in data_list:
             if isinstance(item, dict):
-                # 直接提取IP和端口
+                # 提取关键字段
                 ip = item.get('ip', '')
                 port = item.get('port', '')
+                org = item.get('org', '')
                 
                 # 确保ip和port都存在且有效
                 if ip and port and re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
@@ -940,7 +944,7 @@ class IPTVSourceCollector:
                             'domain': '',
                             'country': 'CN',
                             'city': '',
-                            'org': '',
+                            'org': org,
                             '_source': 'quake360'
                         })
         
