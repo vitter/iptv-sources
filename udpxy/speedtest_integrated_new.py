@@ -2,13 +2,14 @@
 """
 IPTV(udpxy) IP 搜索与测速综合工具 - 新版本
 
-使用FOFA API 或登录Cookie进行搜索，Quake360使用Token认证，ZoomEye使用API Key认证
+使用FOFA API 或登录Cookie进行搜索，Quake360使用Token认证，ZoomEye使用API Key认证，Hunter使用API Key认证
 
 功能：
-1. 从 FOFA、Quake360 和 ZoomEye 搜索 udpxy IP
+1. 从 FOFA、Quake360、ZoomEye 和 Hunter 搜索 udpxy IP
    - FOFA支持API密钥和Cookie认证
-   - Quake360使用Token认证
-   - ZoomEye使用API Key认证
+   - Quake360使用Token认证（可选）
+   - ZoomEye使用API Key认证（可选）
+   - Hunter使用API Key认证（可选）
 2. 端口连通性测试
 3. HTTP/M3U8 流媒体测速
 4. 生成结果文件
@@ -19,9 +20,10 @@ python speedtest_integrated_new.py <省市> <运营商>
 
 认证方式：
 - FOFA：配置了FOFA_API_KEY时优先使用API方式，失败时回退到Cookie；未配置则使用Cookie方式
-- Quake360：使用QUAKE360_TOKEN进行API认证
-- ZoomEye：使用ZOOMEYE_API_KEY进行API认证
-- FOFA 必须配置Cookie，QUAKE360和ZoomEye可选配置（未配置时跳过对应搜索引擎）
+- Quake360：使用QUAKE360_TOKEN进行API认证（可选）
+- ZoomEye：使用ZOOMEYE_API_KEY进行API认证（可选）
+- Hunter：使用HUNTER_API_KEY进行API认证（可选）
+- FOFA 必须配置Cookie，其他三个引擎可选配置（未配置时跳过对应搜索引擎）
 - 支持多线程加速搜索和测速
 
 注意事项：
@@ -38,8 +40,11 @@ import re
 import socket
 import sys
 import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta  # Hunter API时间范围
 from pathlib import Path
+import traceback
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -53,6 +58,44 @@ try:
 except ImportError:
     BEAUTIFULSOUP_AVAILABLE = False
     print("Warning: BeautifulSoup not available, will use regex parsing for udpxy status")
+
+# Hunter搜索引擎省份拼音到汉字映射
+PROVINCE_PINYIN_TO_CHINESE = {
+    'beijing': '北京',
+    'tianjin': '天津', 
+    'hebei': '河北',
+    'shanxi': '山西',
+    'neimenggu': '内蒙古',
+    'liaoning': '辽宁',
+    'jilin': '吉林',
+    'heilongjiang': '黑龙江',
+    'shanghai': '上海',
+    'jiangsu': '江苏',
+    'zhejiang': '浙江',
+    'anhui': '安徽',
+    'fujian': '福建',
+    'jiangxi': '江西',
+    'shandong': '山东',
+    'henan': '河南',
+    'hubei': '湖北',
+    'hunan': '湖南',
+    'guangdong': '广东',
+    'guangxi': '广西',
+    'hainan': '海南',
+    'chongqing': '重庆',
+    'sichuan': '四川',
+    'guizhou': '贵州',
+    'yunnan': '云南',
+    'xizang': '西藏',
+    'shaanxi': '陕西',
+    'gansu': '甘肃',
+    'qinghai': '青海',
+    'ningxia': '宁夏',
+    'xinjiang': '新疆',
+    'hongkong': '香港',
+    'macao': '澳门',
+    'taiwan': '台湾'
+}
 
 
 class IPTVSpeedTest:
@@ -72,6 +115,7 @@ class IPTVSpeedTest:
         self.fofa_user_agent = os.getenv('FOFA_USER_AGENT')
         self.fofa_api_key = os.getenv('FOFA_API_KEY', '')  # 可选的API密钥
         self.zoomeye_api_key = os.getenv('ZOOMEYE_API_KEY', '')  # ZoomEye API密钥
+        self.hunter_api_key = os.getenv('HUNTER_API_KEY', '')  # Hunter API密钥
         
         # 清理Cookie字符串 - 移除换行符、回车符和多余空格
         raw_fofa_cookie = os.getenv('FOFA_COOKIE', '')
@@ -122,10 +166,7 @@ class IPTVSpeedTest:
         """验证必要的配置是否已设置"""
         missing_configs = []
         
-        # Quake360配置检查 - 只需要Token
-        if not self.quake360_token:
-            missing_configs.append('QUAKE360_TOKEN')
-        
+        # FOFA配置检查 - 必需的配置
         if not self.fofa_user_agent:
             missing_configs.append('FOFA_USER_AGENT')
         
@@ -146,6 +187,7 @@ class IPTVSpeedTest:
         print(f"  FOFA Cookie: ✓")
         print(f"  Quake360 Token: {'✓' if self.quake360_token else '✗'}")
         print(f"  ZoomEye API Key: {'✓' if self.zoomeye_api_key else '✗'}")
+        print(f"  Hunter API Key: {'✓' if self.hunter_api_key else '✗'}")
         
         # 检查FOFA认证方式
         if self.fofa_api_key:
@@ -153,14 +195,23 @@ class IPTVSpeedTest:
         else:
             print("  → FOFA 将使用Cookie认证")
             
-        # Quake360使用Token认证
-        print("  → Quake360 将使用 Token 认证")
+        # Quake360使用Token认证（可选）
+        if self.quake360_token:
+            print("  → Quake360 将使用 Token 认证")
+        else:
+            print("  → Quake360 未配置，将跳过Quake360搜索")
         
-        # ZoomEye使用API Key认证
+        # ZoomEye使用API Key认证（可选）
         if self.zoomeye_api_key:
             print("  → ZoomEye 将使用 API Key 认证")
         else:
             print("  → ZoomEye 未配置，将跳过ZoomEye搜索")
+        
+        # Hunter使用API Key认证（可选）
+        if self.hunter_api_key:
+            print("  → Hunter 将使用 API Key 认证")
+        else:
+            print("  → Hunter 未配置，将跳过Hunter搜索")
     
     def _create_directories(self):
         """创建必要的目录"""
@@ -1135,6 +1186,207 @@ class IPTVSpeedTest:
         
         return ip_ports
     
+    def search_hunter_ips(self):
+        """从 Hunter 搜索 IP - 使用API Key认证"""
+        print(f"===============从 Hunter 检索 IP ({self.region})=================")
+        
+        if not self.hunter_api_key:
+            print("❌ 未配置HUNTER_API_KEY，跳过Hunter搜索")
+            return []
+        
+        print("🔑 使用 Hunter API Key 方式搜索")
+        return self.search_hunter_api()
+    
+    def search_hunter_api(self):
+        """从 Hunter 搜索 IP - API方式，支持翻页获取多页数据"""
+        print("--- Hunter API 搜索 ---")
+        
+        # 获取省份中文名
+        province_chinese = PROVINCE_PINYIN_TO_CHINESE.get(self.region.lower())
+        if not province_chinese:
+            print(f"警告: 未找到省份 '{self.region}' 的中文映射，使用原始名称")
+            province_chinese = self.region
+        
+        # 根据运营商类型构建搜索查询
+        if self.isp.lower() == 'telecom':
+            isp_chinese = '电信'
+        elif self.isp.lower() == 'unicom':
+            isp_chinese = '联通'
+        elif self.isp.lower() == 'mobile':
+            isp_chinese = '移动'
+        else:
+            print(f"警告: 未知运营商类型 '{self.isp}'，使用默认查询")
+            isp_chinese = ''
+        
+        # 构建Hunter查询语句
+        if isp_chinese:
+            query = f'protocol.banner="Server: udpxy"&&app="Linux"&&protocol=="http"&&ip.country="CN"&&ip.isp="{isp_chinese}"&&ip.province="{province_chinese}"'
+        else:
+            query = f'protocol.banner="Server: udpxy"&&app="Linux"&&protocol=="http"&&ip.country="CN"&&ip.province="{province_chinese}"'
+        
+        print(f"查询参数: {query}")
+        print(f"省份: {self.region} -> {province_chinese}")
+        print(f"运营商: {self.isp} -> {isp_chinese}")
+        print(f"最大翻页数限制: {self.max_pages} 页")
+        
+        # 将查询转换为base64url编码
+        query_b64 = base64.urlsafe_b64encode(query.encode('utf-8')).decode('utf-8')
+        
+        # 计算时间范围（最近30天以内避免扣除积分）
+        end_time = datetime.now().strftime('%Y-%m-%d')
+        start_time = (datetime.now() - timedelta(days=29)).strftime('%Y-%m-%d')
+        
+        all_ip_ports = []
+        
+        try:
+            print("发送第一次请求获取总数据量...")
+            # 添加延迟避免API限流
+            time.sleep(2)
+            
+            # 第一次请求，获取总数据量
+            params = {
+                'api-key': self.hunter_api_key,
+                'search': query_b64,
+                'page': 1,
+                'page_size': 10,  # 每页10条数据
+                'is_web': 1,      # 1代表"web资产"
+                'port_filter': 'false',
+                'start_time': start_time,
+                'end_time': end_time
+            }
+            
+            response = requests.get(
+                'https://hunter.qianxin.com/openApi/search',
+                params=params,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            print(f"API响应状态码: {response.status_code}")
+            
+            # 解析JSON响应
+            response_json = response.json()
+            
+            # 检查API错误
+            code = response_json.get('code')
+            if code != 200:
+                error_message = response_json.get('message', '未知错误')
+                print(f"Hunter API错误: {code} - {error_message}")
+                return []
+            
+            # 获取总数据量
+            data = response_json.get('data', {})
+            total_count = data.get('total', 0)
+            consume_quota = data.get('consume_quota', '')
+            rest_quota = data.get('rest_quota', '')
+            
+            print(f"总数据量: {total_count}")
+            print(f"积分消耗: {consume_quota}")
+            print(f"剩余积分: {rest_quota}")
+            
+            # 计算总页数
+            page_size = 10  # Hunter每页固定10条
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1  # 向上取整
+            
+            # 应用最大页数限制
+            actual_pages = min(total_pages, self.max_pages)
+            print(f"总页数: {total_pages}, 实际获取页数: {actual_pages}")
+            
+            # 处理第一页数据
+            first_page_data = data.get('arr', [])
+            page_ip_ports = self._extract_hunter_results(first_page_data)
+            all_ip_ports.extend(page_ip_ports)
+            print(f"第1页提取到 {len(page_ip_ports)} 个IP:PORT")
+            
+            # 如果有多页，继续获取其他页的数据
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
+                    
+                    # 更新页码参数
+                    params['page'] = page
+                    
+                    # 添加延迟避免API限流
+                    time.sleep(2)
+                    
+                    try:
+                        response = requests.get(
+                            'https://hunter.qianxin.com/openApi/search',
+                            params=params,
+                            timeout=30
+                        )
+                        response.raise_for_status()
+                        
+                        response_json = response.json()
+                        
+                        # 检查错误
+                        code = response_json.get('code')
+                        if code != 200:
+                            error_message = response_json.get('message', '未知错误')
+                            print(f"第{page}页Hunter API错误: {code} - {error_message}")
+                            continue
+                        
+                        page_data = response_json.get('data', {}).get('arr', [])
+                        page_ip_ports = self._extract_hunter_results(page_data)
+                        all_ip_ports.extend(page_ip_ports)
+                        print(f"第{page}页提取到 {len(page_ip_ports)} 个IP:PORT")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
+            
+            # 去重结果
+            unique_ips = list(set(all_ip_ports))
+            
+            print(f"Hunter API总共提取到 {len(all_ip_ports)} 个IP:PORT")
+            print(f"去重后共 {len(unique_ips)} 个唯一IP")
+            
+            if unique_ips:
+                # 显示前10个IP
+                print("提取到的IP地址:")
+                for ip in unique_ips[:10]:
+                    print(f"  {ip}")
+                if len(unique_ips) > 10:
+                    print(f"  ... 还有 {len(unique_ips) - 10} 个")
+                
+                return unique_ips
+            else:
+                print("Hunter API未找到有效的IP地址")
+                return []
+                
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_ip_ports)} 个结果")
+            return list(set(all_ip_ports))  # 返回已获取的去重结果
+        except requests.exceptions.RequestException as e:
+            print(f"Hunter API请求失败: {e}")
+            return []
+        except Exception as e:
+            print(f"Hunter API搜索异常: {e}")
+            return []
+    
+    def _extract_hunter_results(self, data_list):
+        """提取Hunter搜索结果数据"""
+        ip_ports = []
+        
+        for item in data_list:
+            if isinstance(item, dict):
+                # 提取IP地址
+                ip = item.get('ip')
+                # 提取端口
+                port = item.get('port')
+                
+                # 组合IP:PORT
+                if ip and port:
+                    # 确保IP是有效的IP地址格式
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
+                        ip_port = f"{ip}:{port}"
+                        ip_ports.append(ip_port)
+        
+        return ip_ports
+    
         
     def test_port_connectivity(self, ip_port, timeout=2):
         """测试端口连通性"""
@@ -1771,13 +2023,15 @@ class IPTVSpeedTest:
             fofa_ips = self.search_fofa_ips()
             quake_ips = self.search_quake360_ips()
             zoomeye_ips = self.search_zoomeye_ips()
+            hunter_ips = self.search_hunter_ips()
             
             # 合并并去重
-            all_ips = list(set(fofa_ips + quake_ips + zoomeye_ips))
-            print(f"从FOFA、Quake360和ZoomEye总共找到 {len(all_ips)} 个唯一 IP")
+            all_ips = list(set(fofa_ips + quake_ips + zoomeye_ips + hunter_ips))
+            print(f"从FOFA、Quake360、ZoomEye和Hunter总共找到 {len(all_ips)} 个唯一 IP")
             print(f"  FOFA: {len(fofa_ips)} 个")
             print(f"  Quake360: {len(quake_ips)} 个") 
             print(f"  ZoomEye: {len(zoomeye_ips)} 个")
+            print(f"  Hunter: {len(hunter_ips)} 个")
             
             if not all_ips:
                 print("未找到任何 IP，程序退出")

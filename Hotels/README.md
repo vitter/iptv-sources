@@ -5,11 +5,39 @@
 ## 功能特点
 
 - **多模式支持**：支持jsmpeg-streamer、txiptv、zhgxtv三种不同的IPTV服务器类型
+- **四引擎搜索**：集成FOFA、360 Quake、ZoomEye、Hunter四大搜索引擎
 - **智能IP扫描**：自动扫描同一C段网络中的所有可用IP地址
 - **并发测速**：使用多线程和异步技术进行高效的频道可用性检测和网速测试
 - **频道标准化**：自动标准化频道名称，特别是CCTV频道的命名规范
 - **多格式输出**：生成.txt和.m3u格式的播放列表文件
 - **分类整理**：自动将频道分类为央视频道、卫视频道和其他频道
+- **智能去重**：自动去除重复的IPTV源，提高数据质量
+
+## 搜索引擎支持
+
+### 支持的搜索引擎
+- **FOFA** - 网络资产搜索引擎
+- **360 Quake** - 网络空间资产搜索引擎  
+- **ZoomEye** - 钟馗之眼网络空间搜索引擎
+- **Hunter** - 鹰图平台网络空间搜索引擎
+
+### 环境变量配置
+在使用前需要在 `.env` 文件中配置API密钥：
+
+```bash
+# FOFA配置
+FOFA_USER_AGENT=你的FOFA_UserAgent
+FOFA_COOKIE=你的FOFA_Cookie
+
+# 360 Quake配置
+QUAKE360_TOKEN=你的360_Quake_Token
+
+# ZoomEye配置
+ZOOMEYE_API_KEY=你的ZoomEye_API_Key
+
+# Hunter配置  
+HUNTER_API_KEY=你的Hunter_API_Key
+```
 
 ## 支持的IPTV服务器类型
 
@@ -49,21 +77,73 @@ python all-z-j-new.py [选项]
 #### 参数说明
 
 - `--jsmpeg <文件路径>`：指定jsmpeg-streamer模式的CSV文件
+## 工具说明
+
+### 1. makecsv.py - 四引擎IPTV源收集工具
+
+这是一个基于四大搜索引擎的IPTV源自动收集工具，支持从多个网络空间搜索引擎中获取IPTV服务器信息。
+
+#### 主要特性
+- **四引擎并行搜索**：同时使用FOFA、360 Quake、ZoomEye、Hunter四个搜索引擎
+- **智能去重**：自动去除重复的IP地址和端口
+- **地区运营商过滤**：支持按省份和运营商精确筛选
+- **时间范围控制**：支持指定搜索的时间范围
+- **多种服务器类型**：支持jsmpeg、txiptv、zhgxtv三种IPTV服务器类型
+
+#### 使用方法
+
+```bash
+# 基本使用
+python3 makecsv.py --region Hebei --isp Telecom --days 30 --type jsmpeg
+
+# 参数说明
+--region    地区（如：Hebei, Shanghai, Guangdong, Beijing等）
+--isp       运营商（Telecom, Unicom, Mobile）
+--days      搜索天数（1-365）
+--type      源类型（jsmpeg, txiptv, zhgxtv）
+```
+
+#### 输出文件
+- `jsmpeg_new.csv` - jsmpeg类型的IPTV源
+- `txiptv_new.csv` - txiptv类型的IPTV源
+- `zhgxtv_new.csv` - zhgxtv类型的IPTV源
+
+### 2. all-z-j-new.py - IPTV频道探测与测速工具
+
+基于makecsv.py收集的源进行频道探测和测速的工具。
+
+#### 命令行参数
+
+- `--jsmpeg <文件路径>`：指定jsmpeg模式的CSV文件  
 - `--txiptv <文件路径>`：指定txiptv模式的CSV文件  
 - `--zhgxtv <文件路径>`：指定zhgxtv模式的CSV文件
 - `--output <前缀>`：输出文件前缀（默认：itvlist）
 
-### 使用示例
+#### 使用示例
 
 ```bash
 # 单模式使用
-python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv
+python all-z-j-new.py --jsmpeg jsmpeg_new.csv
 
 # 多模式组合使用
-python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv --zhgxtv zhgxtv_hosts.csv
+python all-z-j-new.py --jsmpeg jsmpeg_new.csv --txiptv txiptv_new.csv --zhgxtv zhgxtv_new.csv
 
 # 自定义输出文件名
-python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output my_channels
+python all-z-j-new.py --jsmpeg jsmpeg_new.csv --output my_channels
+```
+
+## 完整工作流程
+
+1. **配置环境变量**：在`.env`文件中配置四个搜索引擎的API密钥
+2. **收集IPTV源**：使用`makecsv.py`从四引擎收集IPTV服务器信息
+3. **探测频道**：使用`all-z-j-new.py`探测频道并生成播放列表
+
+```bash
+# 步骤1：收集jsmpeg类型的河北电信IPTV源
+python3 makecsv.py --region Hebei --isp Telecom --days 30 --type jsmpeg
+
+# 步骤2：探测频道并生成播放列表
+python all-z-j-new.py --jsmpeg jsmpeg_new.csv --output hebei_telecom
 ```
 
 ## CSV文件格式

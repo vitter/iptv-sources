@@ -18,7 +18,7 @@ iptv-sources/
 ### 📡 多源获取与探测
 - **Hotels**: 支持jsmpeg、txiptv、zhgxtv三种IPTV服务器类型的批量探测
 - **mobileunicast**: 从27个优质移动网络源下载并合并频道
-- **udpxy**: 通过FOFA和Quake360搜索udpxy代理服务器
+- **udpxy**: 通过FOFA、Quake360、ZoomEye和Hunter四大搜索引擎搜索udpxy代理服务器
 - **ISP**: 从预定义源列表下载直播源文件
 
 ### ⚡ 智能测速与优化
@@ -136,7 +136,7 @@ python unicast.py --top 5
 **适用场景**: 搜索和测试特定地区运营商的udpxy代理服务器
 
 **主要特性**:
-- 集成FOFA和Quake360两大搜索引擎
+- 集成FOFA、Quake360、ZoomEye和Hunter四大搜索引擎
 - API密钥优先，Cookie备用的双重认证机制
 - 真实流媒体环境测速
 - 支持翻页获取大量数据（默认10页限制）
@@ -153,9 +153,11 @@ python speedtest_integrated_new.py Shanghai Unicom --max-pages 5
 **配置要求**:
 ```env
 # .env文件配置
-QUAKE360_TOKEN=your_token
+QUAKE360_TOKEN=your_token    # 可选
 FOFA_COOKIE=your_cookie
-FOFA_API_KEY=your_api_key  # 可选
+FOFA_API_KEY=your_api_key    # 可选
+ZOOMEYE_API_KEY=your_key     # 可选
+HUNTER_API_KEY=your_key      # 可选，新增支持
 FOFA_USER_AGENT=Mozilla/5.0...
 ```
 
@@ -248,7 +250,7 @@ python speedtest_integrated_new.py Beijing Telecom
 - 准备CSV格式的服务器列表
 - 选择对应的服务器类型（jsmpeg/txiptv/zhgxtv）
 - 进行批量扫描和测速
-- 结合makecsv.py使用可生成更新CSV列表文件，通过FOFA和Quake360搜索
+- 结合makecsv.py使用可生成更新CSV列表文件，通过FOFA、Quake360、ZoomEye和Hunter搜索
 
 ### 场景3: 按运营商维护源库
 **推荐工具**: `ISP`
@@ -258,7 +260,7 @@ python speedtest_integrated_new.py Beijing Telecom
 
 ### 场景4: 特定地区代理发现
 **推荐工具**: `udpxy`
-- 配置FOFA和Quake360认证
+- 配置FOFA、Quake360、ZoomEye和Hunter认证
 - 选择目标地区和运营商
 - 获取可用的udpxy代理列表
 
@@ -336,8 +338,8 @@ curl -H "X-QuakeToken: $QUAKE360_TOKEN" "https://quake.360.cn/api/v3/user/info"
 
 ---
 
-**最后更新**: 2025年7月31日  
-**当前版本**: v2.0  
+**最后更新**: 2025年8月14日  
+**当前版本**: v2.3 - Hunter搜索引擎集成版本  
 **维护状态**: 积极维护中
 
 ⭐ 如果这个工具集对您有帮助，请给个Star支持一下！

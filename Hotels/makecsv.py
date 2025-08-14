@@ -3,7 +3,7 @@
 IPTV 源数据获取与合并工具
 
 功能：
-1. 从 FOFA 和 Quake360 搜索指定类型的IPTV服务
+1. 从 FOFA、Quake360、ZoomEye 和 Hunter 搜索指定类型的IPTV服务
 2. 合并现有CSV文件数据
 3. 按照指定规则进行去重（host排重，同一个C段IP不同端口去重）
 4. 更新CSV文件
@@ -18,7 +18,7 @@ IPTV 源数据获取与合并工具
 综合使用：python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7 --region guangdong --isp mobile
 
 参数说明：
---days: 日期过滤天数，搜索最近N天的数据，默认为30天
+--days: 日期过滤天数，搜索最近N天的数据，默认为29天
 --region: 指定省份，不区分大小写，格式化为首字母大写其他小写
 --isp: 指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写
 
@@ -28,15 +28,17 @@ IPTV 源数据获取与合并工具
 --zhgxtv: 搜索 body="ZHGXTV" && country="CN" && after="YYYY-MM-DD"
 
 省份和运营商过滤规则：
-1. 只指定region：FOFA增加 && region="{region}"，Quake360增加 AND province:"{region}"
-2. 只指定isp：FOFA增加运营商org过滤条件，Quake360增加 AND isp:"中国XXX"
+1. 只指定region：FOFA增加 && region="{region}"，Quake360增加 AND province:"{region}"，ZoomEye增加 && subdivisions="{region}"，Hunter增加 && ip.province="{region_chinese}"
+2. 只指定isp：FOFA增加运营商org过滤条件，Quake360增加 AND isp:"中国XXX"，ZoomEye增加 && isp="China XXX"，Hunter增加 && ip.isp="{isp_chinese}"
 3. 同时指定region和isp：同时应用上述两种过滤规则
 
 环境变量配置：
 FOFA_COOKIE - FOFA网站登录Cookie
 FOFA_USER_AGENT - 浏览器User-Agent
 FOFA_API_KEY - FOFA API密钥（可选）
-QUAKE360_TOKEN - Quake360 API Token
+QUAKE360_TOKEN - Quake360 API Token（可选）
+ZOOMEYE_API_KEY - ZoomEye API密钥（可选）
+HUNTER_API_KEY - Hunter API密钥（可选）
 """
 #三个csv对应fofa上的搜索指纹分别是：
 #jsmpeg-streamer fid="OBfgOOMpjONAJ/cQ1FpaDQ=="
@@ -80,11 +82,22 @@ except ImportError:
     def load_dotenv():
         pass
 
+# Hunter搜索引擎省份拼音到中文的映射字典
+PROVINCE_PINYIN_TO_CHINESE = {
+    'beijing': '北京', 'tianjin': '天津', 'hebei': '河北', 'shanxi': '山西', 'neimenggu': '内蒙古',
+    'liaoning': '辽宁', 'jilin': '吉林', 'heilongjiang': '黑龙江', 'shanghai': '上海', 
+    'jiangsu': '江苏', 'zhejiang': '浙江', 'anhui': '安徽', 'fujian': '福建', 'jiangxi': '江西',
+    'shandong': '山东', 'henan': '河南', 'hubei': '湖北', 'hunan': '湖南', 'guangdong': '广东',
+    'guangxi': '广西', 'hainan': '海南', 'chongqing': '重庆', 'sichuan': '四川', 'guizhou': '贵州',
+    'yunnan': '云南', 'xizang': '西藏', 'shaanxi': '陕西', 'gansu': '甘肃', 'qinghai': '青海',
+    'ningxia': '宁夏', 'xinjiang': '新疆', 'taiwan': '台湾', 'xianggang': '香港', 'aomen': '澳门'
+}
+
 
 class IPTVSourceCollector:
     """IPTV 源数据收集器"""
     
-    def __init__(self, days=30, region=None, isp=None):
+    def __init__(self, days=29, region=None, isp=None):
         # 保存日期过滤参数
         self.days = days
         
@@ -99,6 +112,8 @@ class IPTVSourceCollector:
         self.quake360_token = os.getenv('QUAKE360_TOKEN')
         self.fofa_user_agent = os.getenv('FOFA_USER_AGENT')
         self.fofa_api_key = os.getenv('FOFA_API_KEY', '')
+        self.zoomeye_api_key = os.getenv('ZOOMEYE_API_KEY', '')  # ZoomEye API密钥
+        self.hunter_api_key = os.getenv('HUNTER_API_KEY', '')  # Hunter API密钥
         
         # 清理Cookie字符串
         raw_fofa_cookie = os.getenv('FOFA_COOKIE', '')
@@ -138,13 +153,34 @@ class IPTVSourceCollector:
             return None
         return formatted
     
-    def _get_date_filter(self, days=30):
-        """获取日期过滤器，返回当前日期减去指定天数的日期字符串"""
+    def _get_date_filter(self, days=29):
+        """获取日期过滤器，返回当前日期减去指定天数的日期字符串（仅用于FOFA）"""
         # 计算指定天数前的日期
         target_date = datetime.now() - timedelta(days=days)
         # 格式化为 YYYY-MM-DD 格式
         date_str = target_date.strftime("%Y-%m-%d")
         return f'after="{date_str}"'
+    
+    def _get_zoomeye_date_filter(self, days=29):
+        """获取ZoomEye的时间过滤器"""
+        # ZoomEye支持 after="2020-01-01" 格式
+        target_date = datetime.now() - timedelta(days=days)
+        date_str = target_date.strftime("%Y-%m-%d")
+        return f' && after="{date_str}"'
+    
+    def _get_hunter_time_range(self, days=29):
+        """获取Hunter的时间范围参数"""
+        # Hunter使用 start_time 和 end_time 参数
+        end_time = datetime.now().strftime('%Y-%m-%d')
+        start_time = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        return start_time, end_time
+    
+    def _get_quake360_time_range(self, days=29):
+        """获取360 Quake的时间范围参数"""
+        # 360 Quake使用 start_time 和 end_time 参数，格式为 YYYY-MM-DD HH:MM:SS (UTC)
+        end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        start_time = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        return start_time, end_time
     
     def _get_region_filter_fofa(self):
         """获取FOFA的省份过滤器"""
@@ -190,6 +226,50 @@ class IPTVSourceCollector:
             'Telecom': ' AND isp:"中国电信"',
             'Unicom': ' AND isp:"中国联通"',
             'Mobile': ' AND isp:"中国移动"'
+        }
+        
+        return isp_mapping.get(self.isp, "")
+    
+    def _get_region_filter_zoomeye(self):
+        """获取ZoomEye的地区过滤器"""
+        if not self.region:
+            return ""
+        return f' && subdivisions="{self.region}"'
+    
+    def _get_isp_filter_zoomeye(self):
+        """获取ZoomEye的运营商过滤器"""
+        if not self.isp:
+            return ""
+        
+        isp_mapping = {
+            'Telecom': ' && isp="China Telecom"',
+            'Unicom': ' && isp="China Unicom"',
+            'Mobile': ' && isp="China Mobile"'
+        }
+        
+        return isp_mapping.get(self.isp, "")
+    
+    def _get_region_filter_hunter(self):
+        """获取Hunter的地区过滤器"""
+        if not self.region:
+            return ""
+        
+        # 获取省份中文名
+        province_chinese = PROVINCE_PINYIN_TO_CHINESE.get(self.region.lower())
+        if not province_chinese:
+            province_chinese = self.region
+        
+        return f'&&ip.province="{province_chinese}"'
+    
+    def _get_isp_filter_hunter(self):
+        """获取Hunter的运营商过滤器"""
+        if not self.isp:
+            return ""
+        
+        isp_mapping = {
+            'Telecom': '&&ip.isp="电信"',
+            'Unicom': '&&ip.isp="联通"',
+            'Mobile': '&&ip.isp="移动"'
         }
         
         return isp_mapping.get(self.isp, "")
@@ -706,6 +786,10 @@ class IPTVSourceCollector:
             print("未配置QUAKE360_TOKEN，跳过Quake360搜索")
             return []
         
+        # 获取时间范围参数
+        start_time, end_time = self._get_quake360_time_range(self.days)
+        print(f"360 Quake时间范围: {start_time} 到 {end_time} ({self.days}天)")
+        
         all_extracted_data = []
         
         # 第一次请求，获取总数据量
@@ -715,7 +799,9 @@ class IPTVSourceCollector:
             "size": 100,  # 每页100条数据
             "ignore_cache": False,
             "latest": True,
-            "shortcuts": "635fcb52cc57190bd8826d09"  # 排除蜜罐系统结果
+            "shortcuts": "635fcb52cc57190bd8826d09",  # 排除蜜罐系统结果
+            "start_time": start_time,  # 添加开始时间
+            "end_time": end_time       # 添加结束时间
         }
         
         headers = {
@@ -860,8 +946,502 @@ class IPTVSourceCollector:
         
         return extracted_data
     
-    def search_both_engines(self, query_fofa, query_quake360):
-        """从两个搜索引擎获取数据"""
+    def search_zoomeye_api(self, query):
+        """从 ZoomEye 搜索数据 - API方式，支持翻页获取全部数据"""
+        if not self.zoomeye_api_key:
+            print("❌ 未配置ZOOMEYE_API_KEY，跳过ZoomEye搜索")
+            return []
+        
+        print("使用ZoomEye API搜索")
+        
+        # 为ZoomEye查询添加时间过滤器
+        zoomeye_date_filter = self._get_zoomeye_date_filter(self.days)
+        full_query = query + zoomeye_date_filter
+        
+        print(f"ZoomEye完整查询: {full_query}")
+        
+        # 将查询转换为base64编码
+        query_b64 = base64.b64encode(full_query.encode()).decode().replace('\n', '')
+        
+        all_data = []
+        
+        # 构建请求头
+        headers = {
+            'API-KEY': self.zoomeye_api_key,
+            'Content-Type': 'application/json',
+            'User-Agent': self.fofa_user_agent
+        }
+        
+        try:
+            # 第一次请求，获取总数据量
+            print("发送第一次请求获取总数据量...")
+            time.sleep(2)
+            
+            # 构建请求数据
+            request_data = {
+                "qbase64": query_b64,
+                "page": 1,
+                "pagesize": 20,  # 每页20条数据
+                "sub_type": "v4",  # IPv4数据
+                "fields": "ip,port,domain,url,title,service,country.name,city.name,isp.name,organization.name,update_time"  # 与CSV字段对应的必要信息
+            }
+            
+            response = requests.post(
+                'https://api.zoomeye.org/v2/search',
+                headers=headers,
+                json=request_data,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            print(f"API响应状态码: {response.status_code}")
+            
+            # 解析JSON响应
+            response_json = response.json()
+            
+            # 检查API错误
+            code = response_json.get('code')
+            if code and str(code) != '60000':  # ZoomEye成功响应码是60000
+                error_message = response_json.get('message', '未知错误')
+                print(f"ZoomEye API错误: {code} - {error_message}")
+                return []
+            
+            # 获取总数据量
+            total_count = response_json.get('total', 0)
+            page_size = 20
+            print(f"ZoomEye总数据量: {total_count}")
+            print(f"页面大小: {page_size}")
+            
+            # 计算总页数
+            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+            print(f"将获取 {total_pages} 页数据")
+            
+            # 处理第一页数据
+            data_list = response_json.get('data', [])
+            
+            # 显示前3个原始结果示例
+            if data_list:
+                print(f"ZoomEye API返回结果示例:")
+                for i, result in enumerate(data_list[:3]):
+                    # 提取关键字段显示，与FOFA格式保持一致
+                    ip = result.get('ip', '')
+                    port = result.get('port', '')
+                    host = f"{ip}:{port}" if ip and port else ''
+                    
+                    # 优先使用url字段
+                    link = result.get('url', '')
+                    if not link and host:
+                        link = f"http://{host}"
+                    
+                    domain = result.get('domain', '')
+                    title = result.get('title', '')
+                    
+                    # 地理位置信息
+                    country = result.get('country.name', '')
+                    city = result.get('city.name', '')
+                    
+                    # ISP和组织信息
+                    isp = result.get('isp.name', '')
+                    organization = result.get('organization.name', '')
+                    
+                    # 服务信息
+                    service = result.get('service', '')
+                    update_time = result.get('update_time', '')
+                    
+                    # 构建额外信息字符串（简化版本）
+                    extra_info_parts = []
+                    
+                    # 标题和域名
+                    if title:
+                        title_str = ' '.join(title) if isinstance(title, list) else str(title)
+                        extra_info_parts.append(f"Title: {title_str[:30]}")
+                    if domain:
+                        extra_info_parts.append(f"Domain: {domain}")
+                    
+                    # 地理位置
+                    if country or city:
+                        location = f"{country}/{city}".strip('/')
+                        if location:
+                            extra_info_parts.append(f"Location: {location}")
+                    
+                    # 组织信息
+                    if organization:
+                        extra_info_parts.append(f"Org: {organization}")
+                    elif isp:
+                        extra_info_parts.append(f"ISP: {isp}")
+                    
+                    # 服务类型
+                    if service:
+                        extra_info_parts.append(f"Service: {service}")
+                    
+                    # 更新时间
+                    if update_time:
+                        extra_info_parts.append(f"Updated: {update_time}")
+                    
+                    extra_info = ", ".join(extra_info_parts)
+                    
+                    # 模拟FOFA的5字段格式：[ip, host, port, link, extra_info]
+                    formatted_result = [ip, host, str(port), link, extra_info]
+                    print(f"  结果 {i+1}: {formatted_result} (长度: {len(formatted_result)})")
+                    if i >= 2:  # 只显示前3个
+                        break
+            
+            extracted_data = self._extract_zoomeye_results(data_list)
+            all_data.extend(extracted_data)
+            print(f"第1页提取到 {len(extracted_data)} 个有效结果")
+            
+            # 如果有多页，继续获取其他页的数据
+            if total_pages > 1 and total_count > 0:
+                for page in range(2, total_pages + 1):
+                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+                    
+                    # 更新页码参数
+                    request_data['page'] = page
+                    
+                    # 添加延迟避免API限流
+                    time.sleep(2)
+                    
+                    try:
+                        response = requests.post(
+                            'https://api.zoomeye.org/v2/search',
+                            headers=headers,
+                            json=request_data,
+                            timeout=30
+                        )
+                        response.raise_for_status()
+                        
+                        response_json = response.json()
+                        
+                        # 检查错误
+                        code = response_json.get('code')
+                        if code and str(code) != '60000':
+                            error_message = response_json.get('message', '未知错误')
+                            print(f"第{page}页ZoomEye API错误: {code} - {error_message}")
+                            continue
+                        
+                        page_data = response_json.get('data', [])
+                        extracted_data = self._extract_zoomeye_results(page_data)
+                        all_data.extend(extracted_data)
+                        print(f"第{page}页提取到 {len(extracted_data)} 个有效结果")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
+            
+            print(f"ZoomEye总共提取到 {len(all_data)} 个结果")
+            return all_data
+            
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_data)} 个结果")
+            return all_data
+        except requests.exceptions.RequestException as e:
+            print(f"ZoomEye搜索请求失败: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"ZoomEye响应JSON解析错误: {e}")
+            return []
+        except Exception as e:
+            print(f"ZoomEye搜索过程中发生未知错误: {e}")
+            return []
+    
+    def _extract_zoomeye_results(self, data_list):
+        """从ZoomEye API响应中提取结果"""
+        extracted_data = []
+        
+        for item in data_list:
+            try:
+                # ZoomEye API字段映射（简化版本，只取CSV需要的字段）
+                ip = item.get('ip', '').strip()
+                port = str(item.get('port', '')).strip()
+                domain = item.get('domain', '').strip()
+                url = item.get('url', '').strip()
+                
+                # 获取标题信息
+                title = item.get('title', [])
+                if isinstance(title, list) and title:
+                    title_str = ' '.join(title)
+                else:
+                    title_str = str(title) if title else ''
+                
+                # 地理位置信息
+                country = item.get('country.name', 'CN')
+                city = item.get('city.name', '')
+                
+                # ISP和组织信息
+                isp = item.get('isp.name', '')
+                organization = item.get('organization.name', '')
+                
+                # 服务信息
+                service = item.get('service', 'http')
+                update_time = item.get('update_time', '')
+                
+                if ip and port:
+                    # 确保IP是有效的IP地址格式
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
+                        host = f"{ip}:{port}"
+                        
+                        # 优先使用url字段，否则构造链接
+                        if url:
+                            link = url
+                        else:
+                            # 根据service确定协议
+                            protocol_prefix = 'https' if service in ['https', 'ssl'] else 'http'
+                            link = f"{protocol_prefix}://{host}"
+                        
+                        # 构建组织信息，优先使用organization，其次是isp
+                        org_info = organization if organization else isp
+                        
+                        extracted_data.append({
+                            'host': host,
+                            'ip': ip,
+                            'port': port,
+                            'link': link,
+                            'protocol': service if service in ['http', 'https'] else 'http',
+                            'title': title_str[:100],  # 限制标题长度
+                            'domain': domain,
+                            'country': country,
+                            'city': city,
+                            'org': org_info,
+                            '_source': 'zoomeye'
+                        })
+            except Exception as e:
+                print(f"处理ZoomEye结果项时出错: {e}")
+                continue
+        
+        return extracted_data
+    
+    def search_hunter_api(self, query):
+        """从 Hunter 搜索数据 - API方式，支持翻页获取全部数据"""
+        if not self.hunter_api_key:
+            print("❌ 未配置HUNTER_API_KEY，跳过Hunter搜索")
+            return []
+        
+        print("使用Hunter API搜索")
+        print(f"查询参数: {query}")
+        
+        # 将查询转换为base64url编码
+        query_b64 = base64.urlsafe_b64encode(query.encode('utf-8')).decode('utf-8')
+        
+        # 获取时间范围（使用用户指定的天数）
+        start_time, end_time = self._get_hunter_time_range(self.days)
+        print(f"Hunter时间范围: {start_time} 到 {end_time} ({self.days}天)")
+        
+        all_data = []
+        
+        try:
+            # 第一次请求，获取总数据量
+            print("发送第一次请求获取总数据量...")
+            time.sleep(2)
+            
+            # 构建请求参数
+            params = {
+                'api-key': self.hunter_api_key,
+                'search': query_b64,
+                'page': 1,
+                'page_size': 20,  # 每页20条数据
+                'is_web': 1,      # 1代表"web资产"
+                'port_filter': 'false',
+                'start_time': start_time,
+                'end_time': end_time
+            }
+            
+            response = requests.get(
+                'https://hunter.qianxin.com/openApi/search',
+                params=params,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            print(f"API响应状态码: {response.status_code}")
+            
+            # 解析JSON响应
+            response_json = response.json()
+            
+            # 添加调试信息
+            print(f"Hunter API响应结构: {list(response_json.keys())}")
+            
+            # 检查API错误
+            code = response_json.get('code')
+            if code != 200:
+                error_message = response_json.get('message', '未知错误')
+                print(f"Hunter API错误: {code} - {error_message}")
+                return []
+            
+            # 获取总数据量
+            data = response_json.get('data', {})
+            if not data:
+                print("Hunter API返回的data字段为空")
+                return []
+                
+            print(f"Hunter data字段结构: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+            
+            total_count = data.get('total', 0)
+            consume_quota = data.get('consume_quota', '')
+            rest_quota = data.get('rest_quota', '')
+            
+            print(f"Hunter总数据量: {total_count}")
+            print(f"积分消耗: {consume_quota}")
+            print(f"剩余积分: {rest_quota}")
+            
+            # 计算总页数
+            page_size = 20
+            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+            print(f"将获取 {total_pages} 页数据")
+            
+            # 处理第一页数据
+            data_list = data.get('arr', [])
+            if data_list is None:
+                data_list = []
+                print("Hunter API返回的数据列表为空")
+            
+            print(f"Hunter数据列表类型: {type(data_list)}, 长度: {len(data_list) if data_list else 0}")
+            
+            # 显示前3个原始结果示例
+            if data_list:
+                print(f"Hunter API返回结果示例:")
+                for i, result in enumerate(data_list[:3]):
+                    # 提取关键字段显示，与FOFA格式保持一致
+                    ip = result.get('ip', '')
+                    port = result.get('port', '')
+                    host = f"{ip}:{port}" if ip and port else ''
+                    link = result.get('url', f"http://{host}" if host else '')
+                    web_title = result.get('web_title', '')
+                    city = result.get('city', '')
+                    isp = result.get('isp', '')
+                    # 模拟FOFA的5字段格式：[ip, host, port, link, extra_info]
+                    formatted_result = [ip, host, str(port), link, f"{web_title} - {city} {isp}".strip(" -")]
+                    print(f"  结果 {i+1}: {formatted_result} (长度: {len(formatted_result)})")
+                    if i >= 2:  # 只显示前3个
+                        break
+            
+            extracted_data = self._extract_hunter_results(data_list)
+            all_data.extend(extracted_data)
+            print(f"第1页提取到 {len(extracted_data)} 个有效结果")
+            
+            # 如果有多页，继续获取其他页的数据
+            if total_pages > 1 and total_count > 0:
+                for page in range(2, total_pages + 1):
+                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+                    
+                    # 更新页码参数
+                    params['page'] = page
+                    
+                    # 添加延迟避免API限流
+                    time.sleep(2)
+                    
+                    try:
+                        response = requests.get(
+                            'https://hunter.qianxin.com/openApi/search',
+                            params=params,
+                            timeout=30
+                        )
+                        response.raise_for_status()
+                        
+                        response_json = response.json()
+                        
+                        # 检查错误
+                        code = response_json.get('code')
+                        if code != 200:
+                            error_message = response_json.get('message', '未知错误')
+                            print(f"第{page}页Hunter API错误: {code} - {error_message}")
+                            continue
+                        
+                        page_data_wrapper = response_json.get('data', {})
+                        page_data = page_data_wrapper.get('arr', []) if page_data_wrapper else []
+                        extracted_data = self._extract_hunter_results(page_data)
+                        all_data.extend(extracted_data)
+                        print(f"第{page}页提取到 {len(extracted_data)} 个有效结果")
+                        
+                    except KeyboardInterrupt:
+                        print(f"\n用户中断，已获取前 {page-1} 页数据")
+                        break
+                    except Exception as e:
+                        print(f"获取第{page}页数据失败: {e}")
+                        continue
+            
+            print(f"Hunter总共提取到 {len(all_data)} 个结果")
+            return all_data
+            
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_data)} 个结果")
+            return all_data
+        except requests.exceptions.RequestException as e:
+            print(f"Hunter搜索请求失败: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            print(f"Hunter响应JSON解析错误: {e}")
+            return []
+        except Exception as e:
+            print(f"Hunter搜索过程中发生未知错误: {e}")
+            return []
+            
+
+    
+    def _extract_hunter_results(self, data_list):
+        """从Hunter API响应中提取结果"""
+        extracted_data = []
+        
+        # 检查数据列表是否有效
+        if not data_list or not isinstance(data_list, list):
+            print("Hunter数据列表为空或格式不正确")
+            return extracted_data
+        
+        for item in data_list:
+            try:
+                # Hunter API字段映射
+                ip = item.get('ip', '').strip()
+                port = str(item.get('port', '')).strip()
+                domain = item.get('domain', '').strip()
+                
+                # 获取更多字段信息
+                web_title = item.get('web_title', '')
+                country = item.get('country', 'CN')
+                province = item.get('province', '')
+                city = item.get('city', '')
+                isp = item.get('isp', '')
+                protocol = item.get('protocol', 'http')
+                
+                # 处理组件信息
+                components = item.get('component', [])
+                component_info = ''
+                if isinstance(components, list) and components:
+                    component_names = [comp.get('name', '') for comp in components if comp.get('name')]
+                    component_info = ', '.join(component_names)
+                
+                if ip and port:
+                    # 确保IP是有效的IP地址格式
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
+                        host = f"{ip}:{port}"
+                        
+                        # 使用协议信息构建链接
+                        protocol_scheme = 'https' if protocol.lower() == 'https' else 'http'
+                        link = f"{protocol_scheme}://{host}"
+                        
+                        extracted_data.append({
+                            'host': host,
+                            'ip': ip,
+                            'port': port,
+                            'link': link,
+                            'protocol': protocol_scheme,
+                            'title': web_title[:100] if web_title else '',  # 限制标题长度
+                            'domain': domain,
+                            'country': country,
+                            'city': f"{province} {city}".strip(),
+                            'org': isp,
+                            'component': component_info,
+                            '_source': 'hunter'
+                        })
+            except Exception as e:
+                print(f"处理Hunter结果项时出错: {e}")
+                continue
+        
+        return extracted_data
+    
+    def search_all_engines(self, query_fofa, query_quake360, query_zoomeye, query_hunter):
+        """从四个搜索引擎获取数据"""
         all_data = []
         
         # 1. FOFA搜索
@@ -874,7 +1454,34 @@ class IPTVSourceCollector:
         
         all_data.extend(fofa_data)
         
-        # 2. Quake360搜索
+        # 2. Quake360搜索（可选）
+        if self.quake360_token:
+            quake_data = self.search_quake360_api(query_quake360)
+            all_data.extend(quake_data)
+        else:
+            print("❌ 未配置QUAKE360_TOKEN，跳过Quake360搜索")
+        
+        # 3. ZoomEye搜索（可选）
+        if self.zoomeye_api_key:
+            zoomeye_data = self.search_zoomeye_api(query_zoomeye)
+            all_data.extend(zoomeye_data)
+        else:
+            print("❌ 未配置ZOOMEYE_API_KEY，跳过ZoomEye搜索")
+        
+        # 4. Hunter搜索（可选）
+        if self.hunter_api_key:
+            hunter_data = self.search_hunter_api(query_hunter)
+            all_data.extend(hunter_data)
+        else:
+            print("❌ 未配置HUNTER_API_KEY，跳过Hunter搜索")
+        
+        print(f"总共从四个引擎获取到 {len(all_data)} 个结果")
+        return all_data
+    
+    def search_both_engines(self, query_fofa, query_quake360):
+        """从两个搜索引擎获取数据（保持向后兼容）"""
+        # 为了保持向后兼容，将ZoomEye和Hunter查询设为空
+        return self.search_all_engines(query_fofa, query_quake360, "", "")
         quake_data = self.search_quake360_api(query_quake360)
         all_data.extend(quake_data)
         
@@ -1031,7 +1638,7 @@ class IPTVSourceCollector:
         """处理jsmpeg模式"""
         print("\n=== 处理 jsmpeg 模式 ===")
         
-        # 获取日期过滤器
+        # 获取日期过滤器（仅用于FOFA）
         date_filter = self._get_date_filter(self.days)
         
         # 获取省份和运营商过滤器
@@ -1039,16 +1646,24 @@ class IPTVSourceCollector:
         isp_filter_fofa = self._get_isp_filter_fofa()
         region_filter_quake360 = self._get_region_filter_quake360()
         isp_filter_quake360 = self._get_isp_filter_quake360()
+        region_filter_zoomeye = self._get_region_filter_zoomeye()
+        isp_filter_zoomeye = self._get_isp_filter_zoomeye()
+        region_filter_hunter = self._get_region_filter_hunter()
+        isp_filter_hunter = self._get_isp_filter_hunter()
         
-        # 搜索查询（添加日期限制和省份运营商限制）
+        # 搜索查询（注意：ZoomEye、Hunter、360 Quake的时间过滤在各自API方法中处理）
         fofa_query = f'title="jsmpeg-streamer" && country="CN" && {date_filter}{region_filter_fofa}{isp_filter_fofa}'
         quake360_query = f'title:"jsmpeg-streamer" AND country:"China"{region_filter_quake360}{isp_filter_quake360}'
+        zoomeye_query = f'title="jsmpeg-streamer" && country="CN"{region_filter_zoomeye}{isp_filter_zoomeye}'
+        hunter_query = f'web.title="jsmpeg-streamer"&&ip.country="CN"{region_filter_hunter}{isp_filter_hunter}'
         
         print(f"FOFA查询: {fofa_query}")
         print(f"Quake360查询: {quake360_query}")
+        print(f"ZoomEye查询: {zoomeye_query}")
+        print(f"Hunter查询: {hunter_query}")
         
-        # 从搜索引擎获取新数据
-        new_data = self.search_both_engines(fofa_query, quake360_query)
+        # 从四个搜索引擎获取新数据
+        new_data = self.search_all_engines(fofa_query, quake360_query, zoomeye_query, hunter_query)
         
         # 读取现有数据
         existing_data = self.read_existing_csv(csv_file)
@@ -1066,7 +1681,7 @@ class IPTVSourceCollector:
         """处理txiptv模式"""
         print("\n=== 处理 txiptv 模式 ===")
         
-        # 获取日期过滤器
+        # 获取日期过滤器（仅用于FOFA）
         date_filter = self._get_date_filter(self.days)
         
         # 获取省份和运营商过滤器
@@ -1074,16 +1689,24 @@ class IPTVSourceCollector:
         isp_filter_fofa = self._get_isp_filter_fofa()
         region_filter_quake360 = self._get_region_filter_quake360()
         isp_filter_quake360 = self._get_isp_filter_quake360()
+        region_filter_zoomeye = self._get_region_filter_zoomeye()
+        isp_filter_zoomeye = self._get_isp_filter_zoomeye()
+        region_filter_hunter = self._get_region_filter_hunter()
+        isp_filter_hunter = self._get_isp_filter_hunter()
         
-        # 搜索查询（添加日期限制和省份运营商限制）
+        # 搜索查询（注意：ZoomEye、Hunter、360 Quake的时间过滤在各自API方法中处理）
         fofa_query = f'body="/iptv/live/zh_cn.js" && country="CN" && {date_filter}{region_filter_fofa}{isp_filter_fofa}'
         quake360_query = f'body:"/iptv/live/zh_cn.js" AND country:"China"{region_filter_quake360}{isp_filter_quake360}'
+        zoomeye_query = f'http.body="/iptv/live/zh_cn.js" && country="CN"{region_filter_zoomeye}{isp_filter_zoomeye}'
+        hunter_query = f'web.body="/iptv/live/zh_cn.js"&&ip.country="CN"{region_filter_hunter}{isp_filter_hunter}'
         
         print(f"FOFA查询: {fofa_query}")
         print(f"Quake360查询: {quake360_query}")
+        print(f"ZoomEye查询: {zoomeye_query}")
+        print(f"Hunter查询: {hunter_query}")
         
-        # 从搜索引擎获取新数据
-        new_data = self.search_both_engines(fofa_query, quake360_query)
+        # 从四个搜索引擎获取新数据
+        new_data = self.search_all_engines(fofa_query, quake360_query, zoomeye_query, hunter_query)
         
         # 读取现有数据
         existing_data = self.read_existing_csv(csv_file)
@@ -1101,7 +1724,7 @@ class IPTVSourceCollector:
         """处理zhgxtv模式"""
         print("\n=== 处理 zhgxtv 模式 ===")
         
-        # 获取日期过滤器
+        # 获取日期过滤器（仅用于FOFA）
         date_filter = self._get_date_filter(self.days)
         
         # 获取省份和运营商过滤器
@@ -1109,16 +1732,24 @@ class IPTVSourceCollector:
         isp_filter_fofa = self._get_isp_filter_fofa()
         region_filter_quake360 = self._get_region_filter_quake360()
         isp_filter_quake360 = self._get_isp_filter_quake360()
+        region_filter_zoomeye = self._get_region_filter_zoomeye()
+        isp_filter_zoomeye = self._get_isp_filter_zoomeye()
+        region_filter_hunter = self._get_region_filter_hunter()
+        isp_filter_hunter = self._get_isp_filter_hunter()
         
-        # 搜索查询（添加日期限制和省份运营商限制）
+        # 搜索查询（注意：ZoomEye、Hunter、360 Quake的时间过滤在各自API方法中处理）
         fofa_query = f'body="ZHGXTV" && country="CN" && {date_filter}{region_filter_fofa}{isp_filter_fofa}'
         quake360_query = f'body:"ZHGXTV" AND country:"China"{region_filter_quake360}{isp_filter_quake360}'
+        zoomeye_query = f'http.body="ZHGXTV" && country="CN"{region_filter_zoomeye}{isp_filter_zoomeye}'
+        hunter_query = f'web.body="ZHGXTV"&&ip.country="CN"{region_filter_hunter}{isp_filter_hunter}'
         
         print(f"FOFA查询: {fofa_query}")
         print(f"Quake360查询: {quake360_query}")
+        print(f"ZoomEye查询: {zoomeye_query}")
+        print(f"Hunter查询: {hunter_query}")
         
-        # 从搜索引擎获取新数据
-        new_data = self.search_both_engines(fofa_query, quake360_query)
+        # 从四个搜索引擎获取新数据
+        new_data = self.search_all_engines(fofa_query, quake360_query, zoomeye_query, hunter_query)
         
         # 读取现有数据
         existing_data = self.read_existing_csv(csv_file)
@@ -1139,7 +1770,7 @@ def main():
     parser.add_argument('--jsmpeg', help='jsmpeg模式CSV文件路径')
     parser.add_argument('--txiptv', help='txiptv模式CSV文件路径')
     parser.add_argument('--zhgxtv', help='zhgxtv模式CSV文件路径')
-    parser.add_argument('--days', type=int, default=30, help='日期过滤天数，默认30天')
+    parser.add_argument('--days', type=int, default=29, help='日期过滤天数，默认29天')
     parser.add_argument('--region', help='指定省份，不区分大小写，格式化为首字母大写其他小写')
     parser.add_argument('--isp', help='指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写')
     

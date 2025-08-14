@@ -2,14 +2,15 @@
 
 ## 项目简介
 
-这是一个专业的IPTV服务器发现和性能测试工具，集成了多个搜索引擎和完整的测试流程。通过FOFA、Quake360和ZoomEye平台搜索指定地区运营商的udpxy代理服务器，并进行全面的连通性测试和流媒体速度评估。
+这是一个专业的IPTV服务器发现和性能测试工具，集成了多个搜索引擎和完整的测试流程。通过FOFA、Quake360、ZoomEye和Hunter平台搜索指定地区运营商的udpxy代理服务器，并进行全面的连通性测试和流媒体速度评估。
 
 ## 主要功能
 
 ### 🔍 多源IP搜索
 - **FOFA搜索引擎**: 支持API密钥和Cookie两种认证方式，API优先，失败时自动回退到Cookie
-- **Quake360搜索引擎**: 使用Token认证的API接口
-- **ZoomEye搜索引擎**: 使用API Key认证的搜索接口 ⭐**新增**
+- **Quake360搜索引擎**: 使用Token认证的API接口（可选）
+- **ZoomEye搜索引擎**: 使用API Key认证的搜索接口（可选）
+- **Hunter搜索引擎**: 使用API Key认证的搜索接口（可选）⭐**新增**
 - **智能查询构建**: 根据不同运营商（电信/联通/移动）自动构建最优搜索条件
 - **多页数据获取**: 支持翻页获取更多数据，可配置最大页数限制（默认10页）
 - **结果合并去重**: 自动合并多个搜索源的结果并去除重复项
@@ -57,17 +58,20 @@ pip install requests urllib3 python-dotenv
 在项目根目录创建 `.env` 文件，配置必要的认证信息：
 
 ```env
-# Quake360 Token 认证（必需）
-QUAKE360_TOKEN=your_quake360_token_here
-
 # FOFA Cookie 认证（必需）
 FOFA_COOKIE=your_fofa_cookie_string_here
 
 # FOFA API Key（可选，配置后优先使用API方式）
 FOFA_API_KEY=your_fofa_api_key_here
 
-# ZoomEye API Key（可选，配置后启用ZoomEye搜索）⭐新增
+# Quake360 Token 认证（可选）
+QUAKE360_TOKEN=your_quake360_token_here
+
+# ZoomEye API Key（可选，配置后启用ZoomEye搜索）
 ZOOMEYE_API_KEY=your_zoomeye_api_key_here
+
+# Hunter API Key（可选，配置后启用Hunter搜索）⭐**新增**
+HUNTER_API_KEY=your_hunter_api_key_here
 
 # 浏览器用户代理（必需）
 FOFA_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36
@@ -82,11 +86,16 @@ FOFA_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KH
 
 #### Quake360认证
 - **Token方式**（唯一）: 只支持Token认证，需要在Quake360官网申请API Token
-- **必需配置**: `QUAKE360_TOKEN`为必需配置项
+- **可选配置**: `QUAKE360_TOKEN`为可选配置项，未配置时跳过Quake360搜索
 
-#### ZoomEye认证 ⭐新增
+#### ZoomEye认证
 - **API Key方式**（唯一）: 只支持API Key认证，需要在ZoomEye官网申请API密钥
 - **可选配置**: `ZOOMEYE_API_KEY`为可选配置项，未配置时跳过ZoomEye搜索
+
+#### Hunter认证 ⭐**新增**
+- **API Key方式**（唯一）: 只支持API Key认证，需要在Hunter官网申请API密钥
+- **可选配置**: `HUNTER_API_KEY`为可选配置项，未配置时跳过Hunter搜索
+- **省份映射**: 自动将英文省份名称转换为中文进行精确搜索
 
 ### 省份配置文件
 
@@ -164,7 +173,8 @@ python speedtest_integrated_new.py Guangzhou Mobile --max-pages 1
   - FOFA API每页10条，Cookie方式每页10条
   - Quake360每页10条
   - ZoomEye每页10条
-- **数据获取策略**: 三个平台并行搜索，自动合并去重结果
+  - Hunter每页10条
+- **数据获取策略**: 四个平台并行搜索，自动合并去重结果
 
 ### 运行输出示例
 
@@ -180,9 +190,11 @@ python speedtest_integrated_new.py Guangzhou Mobile --max-pages 1
   FOFA Cookie: ✓
   Quake360 Token: ✓
   ZoomEye API Key: ✓
+  Hunter API Key: ✓
   → FOFA 将使用Cookie认证
   → Quake360 将使用 Token 认证
   → ZoomEye 将使用 API Key 认证
+  → Hunter 将使用 API Key 认证
 
 开始为 Hebei Telecom 搜索和测试 IP
 城市: Hebei, 流地址: udp/239.254.200.45:8008
@@ -208,12 +220,21 @@ Quake360 API总共提取到 42 个IP:PORT
 ZoomEye API总共提取到 30 个IP:PORT
 去重后共 10 个唯一IP
 
-从FOFA、Quake360和ZoomEye总共找到 45 个唯一 IP
+===============从 Hunter 检索 IP (Hebei)=================
+🔑 使用 Hunter API Key 方式搜索
+查询参数: port.banner="udpxy" && country="CN" && province="河北" && isp="电信"
+省份: Hebei -> 河北, 运营商: Telecom -> 电信
+...
+Hunter API总共提取到 15 个IP:PORT
+去重后共 8 个唯一IP
+
+从FOFA、Quake360、ZoomEye和Hunter总共找到 53 个唯一 IP
   FOFA: 25 个
   Quake360: 18 个
   ZoomEye: 10 个
-总共将测试 45 个 IP
-============IP端口检测，测试 45 个 IP==============
+  Hunter: 8 个
+总共将测试 53 个 IP
+============IP端口检测，测试 53 个 IP==============
 端口可达: 203.0.113.10:8080
   ✓ udpxy服务: 203.0.113.10:8080 (活跃连接: 0, 地址: 192.168.1.10)
 端口可达: 198.51.100.20:9999
@@ -258,17 +279,26 @@ Quake360 API错误: q5000 - 内部服务器发生错误
 ===============从 ZoomEye 检索 IP (Beijing)=================
 🔑 使用 ZoomEye API Key 方式搜索
 --- ZoomEye API 搜索 ---
-查询参数: app="udpxy" && country="CN" && isp="China Mobile" && subdivisions="Hebei"
+查询参数: app="udpxy" && country="CN" && isp="China Mobile" && subdivisions="Beijing"
 最大翻页数限制: 1 页
 ZoomEye API总共提取到 4 个IP:PORT
 去重后共 4 个唯一IP
 
-从FOFA、Quake360和ZoomEye总共找到 11 个唯一 IP
+===============从 Hunter 检索 IP (Beijing)=================
+🔑 使用 Hunter API Key 方式搜索
+查询参数: port.banner="udpxy" && country="CN" && province="北京" && isp="移动"
+省份: Beijing -> 北京, 运营商: Mobile -> 移动
+最大翻页数限制: 1 页
+Hunter API总共提取到 3 个IP:PORT
+去重后共 3 个唯一IP
+
+从FOFA、Quake360、ZoomEye和Hunter总共找到 14 个唯一 IP
   FOFA: 10 个
   Quake360: 0 个
   ZoomEye: 4 个
-总共将测试 11 个 IP
-============IP端口检测，测试 10 个 IP==============
+  Hunter: 3 个
+总共将测试 14 个 IP
+============IP端口检测，测试 14 个 IP==============
 端口可达: 192.0.2.15:8098
   ✓ udpxy服务: 192.0.2.15:8098 (活跃连接: 6, 地址: 10.254.36.150)
 ===============检索完成，找到 1 个可访问 IP，1 个udpxy服务===============
@@ -360,16 +390,17 @@ UDPXY服务器搜索报告
 ### 完整测试模式流程
 1. **初始化阶段**
    - 加载 `.env` 环境变量配置
-   - 验证必要参数（FOFA Cookie、Quake360 Token、User Agent）
+   - 验证必要参数（FOFA Cookie、User Agent）和可选参数（Quake360 Token、ZoomEye API Key、Hunter API Key）
    - 创建输出目录结构
    - 读取对应运营商的省份配置文件
 
 2. **IP搜索阶段**
    - **FOFA搜索**: 优先使用API方式，失败时自动回退到Cookie方式
-   - **Quake360搜索**: 使用Token认证进行API搜索
+   - **Quake360搜索**: 使用Token认证进行API搜索（可选）
    - **ZoomEye搜索**: 使用API Key认证进行API搜索（可选）
-   - **并行处理**: 三个搜索引擎并行工作，提高搜索效率
-   - **结果处理**: 自动合并三个平台的搜索结果并去重
+   - **Hunter搜索**: 使用API Key认证进行API搜索（可选）
+   - **并行处理**: 四个搜索引擎并行工作，提高搜索效率
+   - **结果处理**: 自动合并四个平台的搜索结果并去重
    - **统计显示**: 显示各平台的贡献数量和总体统计
 
 3. **连通性验证阶段**
@@ -404,7 +435,7 @@ UDPXY服务器搜索报告
 ## 性能特性与参数
 
 ### 并发控制策略
-- **IP搜索**: 支持FOFA、Quake360、ZoomEye平台搜索
+- **IP搜索**: 支持FOFA、Quake360、ZoomEye、Hunter四大平台搜索
 - **连通性测试**: 最大30个并发线程，快速检测大量IP
 - **流媒体测速**: 最大3个并发下载，避免带宽竞争影响测试准确性
 
@@ -432,10 +463,16 @@ UDPXY服务器搜索报告
 - **地理定位**: 结合country和province字段定位
 - **运营商过滤**: 使用中文ISP名称进行精确过滤
 
-#### ZoomEye查询策略 ⭐**新增**
+#### ZoomEye查询策略
 - **应用识别**: 使用app="udpxy"进行应用级别精确匹配
 - **地理定位**: 使用subdivisions字段实现省级精确定位
 - **运营商过滤**: 使用标准化的英文ISP名称（China Telecom/China Unicom/China Mobile）
+
+#### Hunter查询策略 ⭐**新增**
+- **服务识别**: 使用port.banner="udpxy"进行端口横幅精确匹配
+- **地理定位**: 使用province字段结合中文省份名称进行精确定位
+- **运营商过滤**: 使用中文ISP名称（电信/联通/移动）进行精确过滤
+- **省份映射**: 自动将英文省份名转换为中文（如Hebei -> 河北）
 
 ## 故障排除指南
 
@@ -452,9 +489,13 @@ ls -la .env
 cat .env
 
 # 确保包含以下必需配置项:
-# QUAKE360_TOKEN=your_token
 # FOFA_COOKIE=your_cookie  
 # FOFA_USER_AGENT=your_user_agent
+
+# 可选配置项（配置后启用对应搜索引擎）:
+# QUAKE360_TOKEN=your_token
+# ZOOMEYE_API_KEY=your_key
+# HUNTER_API_KEY=your_key
 ```
 
 #### 2. FOFA搜索失败
@@ -472,25 +513,34 @@ cat .env
 - `q5000`: 服务器错误，稍后重试
 - Token无效: 检查Quake360 Token是否正确配置
 
-#### 4. ZoomEye API错误 ⭐**新增**  
+#### 4. ZoomEye API错误
 **问题**: `ZoomEye API错误` 或连接失败  
 **解决方案**:
 - 检查ZoomEye API Key是否正确配置
-- 验证API Key是否有效且未过期
+- 验证API Key是否有效
 - 确认网络能够访问ZoomEye API服务器
 - 检查API调用频率是否超限（每月有配额限制）
 - 如果ZoomEye搜索失败，程序会自动跳过，不影响其他搜索引擎
 
-#### 5. 无可用IP发现
+#### 5. Hunter API错误 ⭐**新增**
+**问题**: `Hunter API错误: 40204` 或其他错误码  
+**解决方案**:
+- `40204`: 权益积分用完，需要购买更多积分或等待下个计费周期
+- `40300`: API Key无效，检查Hunter API Key是否正确配置
+- `40403`: 访问被拒绝，确认API Key权限是否正确
+- 网络错误: 确认网络能够访问Hunter API服务器
+- 如果Hunter搜索失败，程序会自动跳过，不影响其他搜索引擎
+
+#### 6. 无可用IP发现
 **问题**: `没有找到可用的udpxy服务器`  
 **解决方案**:
 - 确认目标地区和运营商是否有相关服务部署
 - 检查省份配置文件中的地区名称是否与搜索参数匹配
 - 尝试扩大搜索范围或调整搜索条件
 - 验证网络环境是否能正常访问目标服务
-- 检查是否至少有一个搜索引擎配置正确（FOFA和Quake360为必需）
+- 检查是否至少有一个搜索引擎配置正确（FOFA为必需，其他为可选）
 
-#### 6. 流媒体测速全部失败
+#### 7. 流媒体测速全部失败
 **问题**: 所有IP的流媒体测速都失败  
 **解决方案**:
 - 检查省份配置文件中的流媒体地址格式是否正确
@@ -535,7 +585,7 @@ API返回总数据量: 539
 
 ### 认证机制
 - **双重认证备份**: FOFA支持API和Cookie两种认证方式的智能切换
-- **Token安全**: Quake360和ZoomEye使用Token认证，避免账号密码泄露风险
+- **Token安全**: Quake360、ZoomEye和Hunter使用Token认证，避免账号密码泄露风险
 - **配置隔离**: 使用环境变量管理敏感信息，支持不同环境配置
 
 ### 数据处理优化
@@ -567,8 +617,16 @@ iptv-speedtest/
 
 ## 更新日志
 
-### 最新功能更新 (v2.2) ⭐**最新**
-- **三引擎搜索集成**: 新增ZoomEye搜索引擎支持，现已支持FOFA、Quake360、ZoomEye三大平台
+### 最新功能更新 (v2.3) ⭐**最新**
+- **四引擎搜索集成**: 新增Hunter搜索引擎支持，现已支持FOFA、Quake360、ZoomEye、Hunter四大平台
+- **省份智能映射**: Hunter引擎支持英文省份名到中文的自动转换（如Hebei -> 河北）
+- **运营商本地化**: Hunter使用中文运营商名称进行精确搜索（电信/联通/移动）
+- **API配额管理**: Hunter支持30天时间窗口，避免高级功能收费
+- **Base64URL编码**: Hunter查询参数使用标准Base64URL编码，符合API v2规范
+- **智能配置管理**: Hunter为可选配置，未配置时自动跳过，保持向下兼容
+
+### ZoomEye引擎集成 (v2.2)
+- **三引擎搜索集成**: 新增ZoomEye搜索引擎支持，实现FOFA、Quake360、ZoomEye三大平台
 - **精准运营商查询**: ZoomEye使用app="udpxy"查询语句，提供更精确的应用级别搜索
 - **地理位置增强**: 使用subdivisions字段实现省级精确定位
 - **智能配置管理**: ZoomEye为可选配置，未配置时自动跳过，不影响现有功能
@@ -641,6 +699,6 @@ iptv-speedtest/
 
 ---
 
-**最后更新**: 2025年8月13日  
-**版本**: v2.2 - ZoomEye搜索引擎集成版本  
-**新增功能**: 三引擎搜索集成、精准运营商查询、地理位置增强
+**最后更新**: 2025年8月14日  
+**版本**: v2.3 - Hunter搜索引擎集成版本  
+**新增功能**: 四引擎搜索集成、省份智能映射、运营商本地化、API配额管理
