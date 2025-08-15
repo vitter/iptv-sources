@@ -15,12 +15,14 @@ IPTV 源数据获取与合并工具
 指定天数：python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7
 指定省份：python makecsv.py --jsmpeg jsmpeg_hosts.csv --region beijing
 指定运营商：python makecsv.py --jsmpeg jsmpeg_hosts.csv --isp telecom
-综合使用：python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7 --region guangdong --isp mobile
+限制翻页：python makecsv.py --jsmpeg jsmpeg_hosts.csv --max-pages 5
+综合使用：python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7 --region guangdong --isp mobile --max-pages 10
 
 参数说明：
 --days: 日期过滤天数，搜索最近N天的数据，默认为29天
 --region: 指定省份，不区分大小写，格式化为首字母大写其他小写
 --isp: 指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写
+--max-pages: 限制最大翻页数，不指定则无限制
 
 搜索规则（自动添加指定天数的日期限制，以及省份和运营商限制）：
 --jsmpeg: 搜索 title="jsmpeg-streamer" && country="CN" && after="YYYY-MM-DD"
@@ -97,9 +99,12 @@ PROVINCE_PINYIN_TO_CHINESE = {
 class IPTVSourceCollector:
     """IPTV 源数据收集器"""
     
-    def __init__(self, days=29, region=None, isp=None):
+    def __init__(self, days=29, region=None, isp=None, max_pages=None):
         # 保存日期过滤参数
         self.days = days
+        
+        # 保存最大翻页数参数
+        self.max_pages = max_pages
         
         # 格式化region和isp参数
         self.region = self._format_region(region) if region else None
@@ -276,25 +281,52 @@ class IPTVSourceCollector:
     
     def _validate_config(self):
         """验证必要的配置是否已设置"""
+        # 检查可用的搜索引擎
+        available_engines = []
         missing_configs = []
         
-        if not self.quake360_token:
-            missing_configs.append('QUAKE360_TOKEN')
+        # 检查FOFA配置（需要User-Agent和Cookie）
+        if self.fofa_user_agent and self.fofa_cookie:
+            available_engines.append('FOFA')
+        else:
+            if not self.fofa_user_agent:
+                missing_configs.append('FOFA_USER_AGENT')
+            if not self.fofa_cookie:
+                missing_configs.append('FOFA_COOKIE')
         
-        if not self.fofa_user_agent:
-            missing_configs.append('FOFA_USER_AGENT')
+        # 检查FOFA API配置
+        if self.fofa_api_key:
+            available_engines.append('FOFA API')
         
-        if not self.fofa_cookie:
-            missing_configs.append('FOFA_COOKIE')
+        # 检查Quake360配置
+        if self.quake360_token:
+            available_engines.append('Quake360')
         
-        if missing_configs:
-            print("错误: 缺少必要的环境变量配置:")
+        # 检查ZoomEye配置
+        if self.zoomeye_api_key:
+            available_engines.append('ZoomEye')
+        
+        # 检查Hunter配置
+        if self.hunter_api_key:
+            available_engines.append('Hunter')
+        
+        # 至少需要一个搜索引擎可用
+        if not available_engines:
+            print("错误: 没有可用的搜索引擎配置!")
+            print("缺少的必要配置:")
             for config in missing_configs:
                 print(f"  - {config}")
-            print("\n请在.env文件中设置这些配置项，或者创建.env文件。")
+            print("\n请至少配置以下其中一组:")
+            print("  1. FOFA: FOFA_USER_AGENT + FOFA_COOKIE")
+            print("  2. FOFA API: FOFA_API_KEY")
+            print("  3. Quake360: QUAKE360_TOKEN")
+            print("  4. ZoomEye: ZOOMEYE_API_KEY")
+            print("  5. Hunter: HUNTER_API_KEY")
+            print("\n请在.env文件中设置这些配置项。")
             sys.exit(1)
         
         print("✓ 配置验证通过")
+        print(f"可用搜索引擎: {', '.join(available_engines)}")
     
     def _create_session_with_retry(self):
         """创建带重试机制的会话"""
@@ -394,7 +426,13 @@ class IPTVSourceCollector:
             page_size = 100
             total_pages = math.ceil(total_size / page_size)
             
-            print(f"将获取 {total_pages} 页数据")
+            # 应用最大页数限制
+            if self.max_pages is not None:
+                actual_pages = min(total_pages, self.max_pages)
+                print(f"总页数: {total_pages}, 限制最大页数: {self.max_pages}, 实际获取: {actual_pages} 页数据")
+            else:
+                actual_pages = total_pages
+                print(f"将获取 {total_pages} 页数据")
             
             # 处理第一页数据
             extracted_data = self._extract_fofa_results(results)
@@ -402,9 +440,9 @@ class IPTVSourceCollector:
             print(f"第1页提取到 {len(extracted_data)} 个有效结果")
             
             # 如果有多页，继续获取其他页的数据
-            if total_pages > 1:
-                for page in range(2, total_pages + 1):
-                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+            if actual_pages > 1:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
                     
                     # 更新页码参数
                     params['page'] = page
@@ -717,7 +755,13 @@ class IPTVSourceCollector:
             # 计算总页数
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
             
-            print(f"将获取 {total_pages} 页数据")
+            # 应用最大页数限制
+            if self.max_pages is not None:
+                actual_pages = min(total_pages, self.max_pages)
+                print(f"总页数: {total_pages}, 限制最大页数: {self.max_pages}, 实际获取: {actual_pages} 页数据")
+            else:
+                actual_pages = total_pages
+                print(f"将获取 {total_pages} 页数据")
             
             # 处理第一页数据
             extracted_data = self._extract_fofa_page_data(content)
@@ -725,9 +769,9 @@ class IPTVSourceCollector:
             print(f"第1页提取到 {len(extracted_data)} 个结果")
             
             # 如果有多页，继续获取其他页的数据
-            if total_pages > 1 and total_count > 0:
-                for page in range(2, total_pages + 1):
-                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
                     
                     # 构建新的URL
                     page_url = f"https://fofa.info/result?qbase64={query_b64}&page={page}&page_size={page_size}"
@@ -796,7 +840,7 @@ class IPTVSourceCollector:
         query_data = {
             "query": query,  # 基础查询语句
             "start": 0,
-            "size": 100,  # 每页100条数据
+            "size": 20,  # 每页20条数据
             "ignore_cache": False,
             "latest": True,
             "shortcuts": ["635fcb52cc57190bd8826d09"],  # 排除蜜罐系统结果
@@ -836,7 +880,7 @@ class IPTVSourceCollector:
             meta = response_json.get('meta', {})
             pagination = meta.get('pagination', {})
             total_count = pagination.get('total', 0)
-            page_size = pagination.get('page_size', 100)
+            page_size = pagination.get('page_size', 20)
             current_page = pagination.get('page_index', 1)
             
             print(f"总数据量: {total_count}")
@@ -844,7 +888,14 @@ class IPTVSourceCollector:
             
             # 计算总页数
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-            print(f"将获取 {total_pages} 页数据")
+            
+            # 应用最大页数限制
+            if self.max_pages is not None:
+                actual_pages = min(total_pages, self.max_pages)
+                print(f"总页数: {total_pages}, 限制最大页数: {self.max_pages}, 实际获取: {actual_pages} 页数据")
+            else:
+                actual_pages = total_pages
+                print(f"将获取 {total_pages} 页数据")
             
             # 处理第一页数据
             first_page_data = response_json.get('data', [])
@@ -853,9 +904,9 @@ class IPTVSourceCollector:
             print(f"第1页提取到 {len(extracted_data)} 个有效结果")
             
             # 如果有多页，继续获取其他页的数据
-            if total_pages > 1 and total_count > 0:
-                for page in range(2, total_pages + 1):
-                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
                     
                     # 更新分页参数
                     query_data['start'] = (page - 1) * page_size
@@ -1018,7 +1069,14 @@ class IPTVSourceCollector:
             
             # 计算总页数
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-            print(f"将获取 {total_pages} 页数据")
+            
+            # 应用最大页数限制
+            if self.max_pages is not None:
+                actual_pages = min(total_pages, self.max_pages)
+                print(f"总页数: {total_pages}, 限制最大页数: {self.max_pages}, 实际获取: {actual_pages} 页数据")
+            else:
+                actual_pages = total_pages
+                print(f"将获取 {total_pages} 页数据")
             
             # 处理第一页数据
             data_list = response_json.get('data', [])
@@ -1095,9 +1153,9 @@ class IPTVSourceCollector:
             print(f"第1页提取到 {len(extracted_data)} 个有效结果")
             
             # 如果有多页，继续获取其他页的数据
-            if total_pages > 1 and total_count > 0:
-                for page in range(2, total_pages + 1):
-                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
                     
                     # 更新页码参数
                     request_data['page'] = page
@@ -1293,7 +1351,14 @@ class IPTVSourceCollector:
             # 计算总页数
             page_size = 20
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-            print(f"将获取 {total_pages} 页数据")
+            
+            # 应用最大页数限制
+            if self.max_pages is not None:
+                actual_pages = min(total_pages, self.max_pages)
+                print(f"总页数: {total_pages}, 限制最大页数: {self.max_pages}, 实际获取: {actual_pages} 页数据")
+            else:
+                actual_pages = total_pages
+                print(f"将获取 {total_pages} 页数据")
             
             # 处理第一页数据
             data_list = data.get('arr', [])
@@ -1326,9 +1391,9 @@ class IPTVSourceCollector:
             print(f"第1页提取到 {len(extracted_data)} 个有效结果")
             
             # 如果有多页，继续获取其他页的数据
-            if total_pages > 1 and total_count > 0:
-                for page in range(2, total_pages + 1):
-                    print(f"正在获取第 {page}/{total_pages} 页数据...")
+            if actual_pages > 1 and total_count > 0:
+                for page in range(2, actual_pages + 1):
+                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
                     
                     # 更新页码参数
                     params['page'] = page
@@ -1777,6 +1842,7 @@ def main():
     parser.add_argument('--days', type=int, default=29, help='日期过滤天数，默认29天')
     parser.add_argument('--region', help='指定省份，不区分大小写，格式化为首字母大写其他小写')
     parser.add_argument('--isp', help='指定运营商 (Telecom/Unicom/Mobile)，不区分大小写，格式化为首字母大写其他小写')
+    parser.add_argument('--max-pages', type=int, help='限制最大翻页数，不指定则无限制')
     
     args = parser.parse_args()
     
@@ -1788,10 +1854,11 @@ def main():
         print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --days 7")
         print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --region beijing --isp telecom")
         print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv --zhgxtv zhgxtv_hosts.csv --days 15 --region guangdong --isp mobile")
+        print("  python makecsv.py --jsmpeg jsmpeg_hosts.csv --max-pages 5")
         sys.exit(1)
     
     # 创建收集器实例
-    collector = IPTVSourceCollector(days=args.days, region=args.region, isp=args.isp)
+    collector = IPTVSourceCollector(days=args.days, region=args.region, isp=args.isp, max_pages=args.max_pages)
     
     # 处理各种模式
     if args.jsmpeg:
