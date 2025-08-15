@@ -101,7 +101,7 @@ PROVINCE_PINYIN_TO_CHINESE = {
 class IPTVSpeedTest:
     """IPTV 测速主类"""
     
-    def __init__(self, region, isp, max_pages=10, notest=False):
+    def __init__(self, region, isp, max_pages=10, notest=False, fast=False):
         # 加载环境变量
         load_dotenv()
         
@@ -109,6 +109,7 @@ class IPTVSpeedTest:
         self.isp = self._format_string(isp)
         self.max_pages = max_pages  # 新增：最大翻页数限制
         self.notest = notest  # 新增：是否跳过流媒体测试
+        self.fast = fast  # 新增：快速模式，只进行第一阶段测试
         
         # 从环境变量读取配置并清理格式
         self.quake360_token = os.getenv('QUAKE360_TOKEN')
@@ -132,10 +133,15 @@ class IPTVSpeedTest:
         # 加载省份配置（仅在需要流媒体测试时加载）
         if not self.notest:
             self.city, self.stream = self._load_province_config()
+            # 初始化默认配置信息，用于后续可能的配置切换
+            self.current_isp = self.isp
+            self.current_region = self.region
         else:
             # 在notest模式下，使用region作为city，stream设为空
             self.city = self.region
             self.stream = ""
+            self.current_isp = self.isp
+            self.current_region = self.region
         
         # 设置输出文件路径
         self.output_dir = Path(f"sum/{self.isp}")
@@ -240,6 +246,38 @@ class IPTVSpeedTest:
         except Exception as e:
             print(f"加载配置文件失败: {e}")
             sys.exit(1)
+    
+    def _load_all_province_configs(self):
+        """加载所有运营商的所有省份配置"""
+        all_configs = []
+        isps = ['Telecom', 'Unicom', 'Mobile']
+        
+        for isp in isps:
+            config_file = f"{isp}_province_list.txt"
+            if not os.path.exists(config_file):
+                print(f"警告: 配置文件 {config_file} 不存在，跳过")
+                continue
+            
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    for line_num, line in enumerate(f, 1):
+                        parts = line.strip().split()
+                        if len(parts) >= 3 and parts[0] != 'city':  # 跳过标题行
+                            config = {
+                                'isp': isp,
+                                'region': parts[0],
+                                'city': parts[1],
+                                'stream': parts[2],
+                                'config_file': config_file,
+                                'line_num': line_num
+                            }
+                            all_configs.append(config)
+            except Exception as e:
+                print(f"读取配置文件 {config_file} 失败: {e}")
+                continue
+        
+        print(f"加载了 {len(all_configs)} 个配置项（来自 {len(isps)} 个运营商）")
+        return all_configs
     
     def _create_session_with_retry(self):
         """创建带重试机制的会话"""
@@ -1688,10 +1726,23 @@ class IPTVSpeedTest:
         print(f"【{self.ipfile_uniq}】内 udpxy IP 共计 {len(unique_udpxy_ips)} 个")
         return unique_udpxy_ips
     
-    def test_stream_speed(self, ip_port):
-        """测试流媒体速度 - 直接下载流媒体数据"""
+    def test_stream_speed(self, ip_port, custom_config=None):
+        """测试流媒体速度 - 直接下载流媒体数据
+        
+        Args:
+            ip_port: IP:PORT格式的地址
+            custom_config: 自定义配置字典，包含 {'stream': 'udp/xxx:xxx', 'isp': 'xxx', 'region': 'xxx', 'city': 'xxx'}
+        """
         session = None
         try:
+            # 使用自定义配置或默认配置
+            if custom_config:
+                stream_path = custom_config['stream']
+                test_info = f"{custom_config['isp']}-{custom_config['region']}"
+            else:
+                stream_path = self.stream
+                test_info = f"{self.current_isp}-{self.current_region}"
+            
             # 创建独立的session
             session = requests.Session()
             session.headers.update({
@@ -1709,8 +1760,8 @@ class IPTVSpeedTest:
             session.mount('http://', adapter)
             
             # 构建流媒体URL
-            stream_url = f"http://{ip_port}/{self.stream}"
-            print(f"  测试流媒体: {stream_url}")
+            stream_url = f"http://{ip_port}/{stream_path}"
+            print(f"  测试流媒体: {stream_url} ({test_info})")
             
             # 直接下载流媒体数据
             start_time = time.time()
@@ -1728,10 +1779,10 @@ class IPTVSpeedTest:
                 )
                 
                 if response.status_code != 200:
-                    print(f"  ! {ip_port} 流媒体响应状态码: {response.status_code}")
+                    print(f"  ! {ip_port} 流媒体响应状态码: {response.status_code} ({test_info})")
                     return None
                 
-                print(f"  开始下载流媒体数据...")
+                print(f"  开始下载流媒体数据... ({test_info})")
                 
                 # 流式下载数据
                 chunk_count = 0
@@ -1805,18 +1856,25 @@ class IPTVSpeedTest:
                 print(f"  ! {ip_port} 速度异常: {speed_mb_per_sec:.3f} MB/s")
                 return None
             
-            print(f"  ✓ {ip_port} 下载完成:")
+            print(f"  ✓ {ip_port} 下载完成: ({test_info})")
             print(f"    总大小: {total_size/1024:.1f}KB")
             print(f"    总耗时: {total_duration:.2f}秒") 
             print(f"    平均速度: {speed_mb_per_sec:.3f}MB/s")
             
-            return {
+            result = {
                 'ip': ip_port,
                 'speed': speed_mb_per_sec,
                 'file_size': total_size,
                 'duration': total_duration,
                 'url': stream_url
             }
+            
+            # 如果使用了自定义配置，将配置信息也加入结果
+            if custom_config:
+                result['config'] = custom_config
+                print(f"    使用配置: {custom_config['isp']}-{custom_config['region']}-{custom_config['city']}")
+            
+            return result
             
         except Exception as e:
             print(f"  ! {ip_port} 测速异常: {str(e)[:100]}...")
@@ -1829,79 +1887,358 @@ class IPTVSpeedTest:
                 except:
                     pass
     
+    def test_stream_with_fallback_configs(self, ip_port):
+        """使用回退配置测试流媒体速度
+        
+        首先使用默认配置测试，如果失败则尝试所有可能的配置
+        """
+        print(f"开始测试 {ip_port} 的流媒体连接...")
+        
+        # 1. 首先使用默认配置
+        print(f"1. 尝试默认配置: {self.current_isp}-{self.current_region}")
+        result = self.test_stream_speed(ip_port)
+        if result:
+            print(f"✓ 默认配置测试成功")
+            return result
+        
+        print(f"✗ 默认配置测试失败，开始尝试其他配置...")
+        
+        # 2. 加载所有配置并逐一尝试
+        all_configs = self._load_all_province_configs()
+        
+        # 过滤掉已经尝试过的默认配置
+        remaining_configs = [
+            config for config in all_configs 
+            if not (config['isp'].lower() == self.current_isp.lower() and 
+                   config['region'].lower() == self.current_region.lower())
+        ]
+        
+        print(f"将尝试 {len(remaining_configs)} 个其他配置...")
+        
+        # 3. 逐一尝试其他配置
+        for i, config in enumerate(remaining_configs, 2):
+            print(f"{i}. 尝试配置: {config['isp']}-{config['region']}-{config['city']}")
+            
+            # 使用自定义配置测试
+            result = self.test_stream_speed(ip_port, config)
+            if result:
+                print(f"✓ 找到匹配的配置: {config['isp']}-{config['region']}-{config['city']}")
+                print(f"   流地址: {config['stream']}")
+                return result
+            
+            # 限制尝试次数，避免过度测试
+            if i > 96:  # 最多尝试96个配置
+                print(f"已尝试 {i-1} 个配置，停止继续尝试")
+                break
+        
+        print(f"✗ 所有配置都测试失败，该IP可能不支持流媒体服务")
+        return None
+
+    def test_with_other_configs(self, ip_port):
+        """对单个IP测试除默认配置外的其他所有配置"""
+        # 加载所有配置并排除默认配置
+        all_configs = self._load_all_province_configs()
+        
+        remaining_configs = [
+            config for config in all_configs 
+            if not (config['isp'].lower() == self.current_isp.lower() and 
+                   config['region'].lower() == self.current_region.lower())
+        ]
+        
+        print(f"    尝试 {len(remaining_configs)} 个其他配置...")
+        
+        # 逐一尝试其他配置
+        for i, config in enumerate(remaining_configs, 1):
+            if i % 10 == 0:  # 每10个配置显示一次进度
+                print(f"    已尝试 {i}/{len(remaining_configs)} 个配置...")
+            
+            try:
+                result = self.test_stream_speed(ip_port, config)
+                if result:
+                    print(f"    ✓ 找到匹配配置: {config['isp']}-{config['region']}-{config['city']}")
+                    return result
+            except Exception as e:
+                # 单个配置测试失败不影响其他配置
+                if i % 20 == 0:  # 每20个配置显示一次错误统计
+                    print(f"    第{i}个配置测试异常: {str(e)[:50]}...")
+                continue
+            
+            # 限制尝试次数，避免过度测试
+            if i >= 96:  # 减少到最多96个配置，提高效率
+                print(f"    已尝试 {i} 个配置，停止继续尝试")
+                break
+        
+        print(f"    ✗ 尝试了 {min(i, len(remaining_configs))} 个配置都失败")
+        return None
+
     def run_speed_tests(self, ip_list):
-        """运行流媒体测速"""
-        print("==========开始流媒体测速=================")
+        """运行流媒体测速 - 优化版两阶段测试"""
+        mode_text = "（快速模式）" if self.fast else "（两阶段优化版）"
+        print(f"==========开始流媒体测速{mode_text}=================")
+        
+        if self.fast:
+            print("🚀 快速模式启用：仅进行第一阶段默认配置测试")
         
         if not ip_list:
             print("没有可测试的 IP")
             return []
         
-        speed_results = []
-        error_count = 0
-        
-        def test_single_stream(index, ip_port):
-            try:
-                print(f"{index + 1}/{len(ip_list)} 测试udpxy服务: {ip_port}")
-                
-                # 测试流媒体速度
-                result = self.test_stream_speed(ip_port)
-                if result:
-                    speed_str = f"{result['speed']:.3f} MB/s"
-                    print(f"  ✓ {ip_port} - 速度: {speed_str}")
-                    
-                    # 写入日志
-                    with open(self.speedtest_log, 'a', encoding='utf-8') as f:
-                        f.write(f"{ip_port} {speed_str} Size:{result['file_size']}\n")
-                    
-                    return result
-                else:
-                    print(f"  ✗ {ip_port} - 流媒体测速不可用!")
-                    return None
-            except Exception as e:
-                print(f"  ✗ {ip_port} - 测试异常: {e}")
-                return None
-        
         # 清空之前的日志
         if os.path.exists(self.speedtest_log):
             os.remove(self.speedtest_log)
         
-        # 减少并发数，增加超时控制
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # 提交所有任务
+        # 初始化结果文件，清空之前的内容
+        self._initialize_result_files()
+        
+        speed_results = []
+        
+        # ==================== 第一阶段：批量测试默认配置 ====================
+        print(f"第一阶段：使用默认配置 {self.current_isp}-{self.current_region} 测试 {len(ip_list)} 个IP")
+        print("提高并发数，快速筛选出可用的IP...")
+        
+        failed_ips = []
+        completed_count = 0
+        
+        def test_default_config(ip_port):
+            try:
+                result = self.test_stream_speed(ip_port)
+                return ip_port, result, None
+            except Exception as e:
+                return ip_port, None, str(e)
+        
+        # 第一阶段使用更高并发
+        with ThreadPoolExecutor(max_workers=8) as executor:
             future_to_ip = {
-                executor.submit(test_single_stream, i, ip): ip 
-                for i, ip in enumerate(ip_list)
+                executor.submit(test_default_config, ip): ip 
+                for ip in ip_list
             }
             
-            # 使用更短的超时等待结果
-            completed_count = 0
-            for future in as_completed(future_to_ip, timeout=120):
-                try:
-                    result = future.result(timeout=15)
+            try:
+                for future in as_completed(future_to_ip, timeout=180):
                     completed_count += 1
-                    
-                    if result:
-                        speed_results.append(result)
-                        print(f"  完成任务 {completed_count}/{len(ip_list)}: 速度 {result['speed']:.3f} MB/s")
-                    else:
-                        error_count += 1
-                        print(f"  完成任务 {completed_count}/{len(ip_list)}: 失败")
+                    try:
+                        ip_port, result, error = future.result(timeout=10)
                         
-                except Exception as e:
-                    error_count += 1
-                    completed_count += 1
-                    ip_port = future_to_ip[future]
-                    print(f"  完成任务 {completed_count}/{len(ip_list)}: {ip_port} - 任务超时或异常: {e}")
-                
-                # 显示进度
-                progress = (completed_count / len(ip_list)) * 100
-                print(f"进度: {progress:.1f}% - 可用IP：{len(speed_results)} 个, 不可用IP：{error_count} 个")
+                        if result:
+                            speed_str = f"{result['speed']:.3f} MB/s"
+                            print(f"  ✓ [{completed_count}/{len(ip_list)}] {ip_port} - 默认配置成功: {speed_str}")
+                            
+                            # 写入日志
+                            with open(self.speedtest_log, 'a', encoding='utf-8') as f:
+                                f.write(f"{ip_port} {speed_str} Size:{result['file_size']} [默认配置]\n")
+                            
+                            # 实时写入到结果文件和生成播放列表
+                            self._append_result_immediately(result)
+                            
+                            speed_results.append(result)
+                        else:
+                            failed_ips.append(ip_port)
+                            print(f"  ✗ [{completed_count}/{len(ip_list)}] {ip_port} - 默认配置失败")
+                            
+                    except TimeoutError:
+                        ip_port = future_to_ip[future]
+                        failed_ips.append(ip_port)
+                        print(f"  ✗ [{completed_count}/{len(ip_list)}] {ip_port} - 默认配置超时")
+                        future.cancel()
+                    except Exception as e:
+                        ip_port = future_to_ip[future]
+                        failed_ips.append(ip_port)
+                        print(f"  ✗ [{completed_count}/{len(ip_list)}] {ip_port} - 默认配置异常: {e}")
+                    
+                    # 显示阶段进度
+                    progress = (completed_count / len(ip_list)) * 100
+                    print(f"  第一阶段进度: {progress:.1f}% - 成功: {len(speed_results)} 个, 待重试: {len(failed_ips)} 个")
+            
+            except TimeoutError:
+                print(f"第一阶段整体超时，处理未完成的任务...")
+                # 处理未完成的任务
+                for future in future_to_ip:
+                    if not future.done():
+                        ip_port = future_to_ip[future]
+                        failed_ips.append(ip_port)
+                        print(f"  ✗ 超时取消: {ip_port}")
+                        future.cancel()
         
-        print(f"==========流媒体测速完成=================")
-        print(f"总计: {len(speed_results)} 个可用IP, {error_count} 个失败")
+        print(f"第一阶段完成：成功 {len(speed_results)} 个，失败 {len(failed_ips)} 个")
+        
+        # ==================== 第二阶段：失败IP尝试其他配置 ====================
+        if failed_ips and not self.fast:
+            print(f"\n第二阶段：对 {len(failed_ips)} 个失败IP尝试其他配置...")
+            print("降低并发数，避免过载，逐一尝试所有可能配置...")
+            
+            def test_other_configs(index, ip_port):
+                try:
+                    print(f"  第二阶段 [{index + 1}/{len(failed_ips)}] 测试 {ip_port}")
+                    result = self.test_with_other_configs(ip_port)
+                    if result:
+                        config_info = ""
+                        if 'config' in result:
+                            config_info = f" [{result['config']['isp']}-{result['config']['region']}]"
+                        return result, config_info
+                    return None, ""
+                except Exception as e:
+                    print(f"    ✗ {ip_port} - 其他配置测试异常: {e}")
+                    return None, ""
+            
+            # 第二阶段使用较低并发，避免过载
+            completed_second = 0
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                future_to_data = {
+                    executor.submit(test_other_configs, i, ip): (i, ip) 
+                    for i, ip in enumerate(failed_ips)
+                }
+                
+                try:
+                    # 使用更灵活的超时处理
+                    for future in as_completed(future_to_data, timeout=600):  # 增加总超时到10分钟
+                        completed_second += 1
+                        try:
+                            result, config_info = future.result(timeout=120)  # 每个任务最多2分钟
+                            index, ip_port = future_to_data[future]
+                            
+                            if result:
+                                speed_str = f"{result['speed']:.3f} MB/s"
+                                print(f"  ✓ [{completed_second}/{len(failed_ips)}] {ip_port} - 找到匹配配置: {speed_str}{config_info}")
+                                
+                                # 写入日志
+                                with open(self.speedtest_log, 'a', encoding='utf-8') as f:
+                                    f.write(f"{ip_port} {speed_str} Size:{result['file_size']}{config_info}\n")
+                                
+                                # 实时写入到结果文件和生成播放列表
+                                self._append_result_immediately(result)
+                                
+                                speed_results.append(result)
+                            else:
+                                print(f"  ✗ [{completed_second}/{len(failed_ips)}] {ip_port} - 所有配置都失败")
+                                
+                        except TimeoutError:
+                            index, ip_port = future_to_data[future]
+                            print(f"  ✗ [{completed_second}/{len(failed_ips)}] {ip_port} - 第二阶段任务超时(2分钟)")
+                            # 取消超时的任务
+                            future.cancel()
+                        except Exception as e:
+                            index, ip_port = future_to_data[future]
+                            print(f"  ✗ [{completed_second}/{len(failed_ips)}] {ip_port} - 第二阶段任务异常: {e}")
+                        
+                        # 显示第二阶段进度
+                        progress = (completed_second / len(failed_ips)) * 100
+                        new_success = len(speed_results) - (len(ip_list) - len(failed_ips))
+                        print(f"  第二阶段进度: {progress:.1f}% - 本阶段新增成功: {new_success} 个")
+                
+                except TimeoutError:
+                    print(f"第二阶段整体超时，处理未完成的任务...")
+                    # 处理未完成的任务
+                    unfinished_count = 0
+                    for future in future_to_data:
+                        if not future.done():
+                            unfinished_count += 1
+                            index, ip_port = future_to_data[future]
+                            print(f"  取消未完成任务: {ip_port}")
+                            future.cancel()
+                    
+                    if unfinished_count > 0:
+                        print(f"  共取消 {unfinished_count} 个未完成的任务")
+                
+                finally:
+                    # 最终清理：确保所有未完成的任务都被取消
+                    remaining_tasks = 0
+                    for future in future_to_data:
+                        if not future.done():
+                            remaining_tasks += 1
+                            future.cancel()
+                    
+                    if remaining_tasks > 0:
+                        print(f"  最终清理：取消 {remaining_tasks} 个剩余任务")
+        
+        elif failed_ips and self.fast:
+            print(f"\n🚀 快速模式启用：跳过第二阶段测试")
+            print(f"   失败的 {len(failed_ips)} 个IP将不进行其他配置测试")
+            print(f"   如需完整测试，请移除 --fast 参数")
+        
+        else:
+            print("✓ 所有IP都通过默认配置测试成功，无需第二阶段！")
+        
+        # ==================== 测速总结 ====================
+        total_success = len(speed_results)
+        total_failed = len(ip_list) - total_success
+        success_rate = (total_success / len(ip_list)) * 100 if ip_list else 0
+        
+        print(f"\n==========流媒体测速完成=================")
+        print(f"总计: {total_success} 个可用IP, {total_failed} 个失败")
+        print(f"成功率: {success_rate:.1f}%")
+        print(f"其中默认配置成功: {len(ip_list) - len(failed_ips)} 个")
+        print(f"其他配置成功: {total_success - (len(ip_list) - len(failed_ips))} 个")
         
         return speed_results
+    
+    def _append_result_immediately(self, result):
+        """实时追加单个测试结果到结果文件和播放列表"""
+        try:
+            # 只处理速度大于 0.1 MB/s 的结果
+            if result['speed'] <= 0.1:
+                return
+            
+            # 确定配置信息
+            if 'config' in result:
+                config = result['config']
+                isp = config['isp']
+                city = config['city']
+                config_info = f" [{config['isp']}-{config['region']}]"
+            else:
+                isp = self.isp
+                city = self.city
+                config_info = ""
+            
+            # 1. 追加到原始结果文件
+            result_file = self.temp_dir / f"{isp}_result_fofa_{city}.txt"
+            with open(result_file, 'a', encoding='utf-8') as f:
+                f.write(f"{result['speed']:.3f}  {result['ip']}{config_info}\n")
+            
+            # 2. 实时生成/更新播放列表文件
+            template_file = Path(f"template/{isp}/template_{city}.txt")
+            output_dir = Path(f"sum/{isp}")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"{city}.txt"
+            
+            if template_file.exists():
+                # 读取模板内容
+                with open(template_file, 'r', encoding='utf-8') as tf:
+                    template_content = tf.read()
+                
+                # 替换模板中的占位符并追加到播放列表
+                content = template_content.replace('ipipip', result['ip'])
+                with open(output_file, 'a', encoding='utf-8') as of:
+                    of.write(content)
+                
+                print(f"    ✓ 实时更新播放列表: {output_file}")
+            else:
+                print(f"    ⚠ 模板文件不存在: {template_file}")
+                
+        except Exception as e:
+            print(f"    ✗ 实时写入结果失败: {e}")
+    
+    def _initialize_result_files(self):
+        """初始化结果文件 - 清空之前的内容"""
+        try:
+            # 确保目录存在
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 清空原始结果文件
+            result_file = self.temp_dir / f"{self.isp}_result_fofa_{self.city}.txt"
+            with open(result_file, 'w', encoding='utf-8') as f:
+                pass  # 创建空文件
+            
+            # 清空播放列表文件
+            output_file = self.output_dir / f"{self.city}.txt"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                pass  # 创建空文件
+                
+            print(f"✓ 初始化结果文件: {result_file}")
+            print(f"✓ 初始化播放列表: {output_file}")
+            
+        except Exception as e:
+            print(f"✗ 初始化结果文件失败: {e}")
     
     def generate_results(self, speed_results):
         """生成结果文件"""
@@ -1919,44 +2256,111 @@ class IPTVSpeedTest:
         # 按速度降序排序
         filtered_results.sort(key=lambda x: x['speed'], reverse=True)
         
-        # 保存结果
+        # 保存结果到原始格式文件
         with open(self.result_file, 'w', encoding='utf-8') as f:
             for result in filtered_results:
-                f.write(f"{result['speed']:.3f}  {result['ip']}\n")
+                config_info = ""
+                if 'config' in result:
+                    config_info = f" [{result['config']['isp']}-{result['config']['region']}]"
+                f.write(f"{result['speed']:.3f}  {result['ip']}{config_info}\n")
+        
+        # 统计配置分布
+        config_stats = {}
+        for result in filtered_results:
+            if 'config' in result:
+                config = result['config']
+                key = f"{config['isp']}-{config['region']}"
+            else:
+                key = f"{self.current_isp}-{self.current_region}"
+            
+            config_stats[key] = config_stats.get(key, 0) + 1
         
         print(f"======本次{self.region}组播IP搜索结果=============")
+        print(f"共找到 {len(filtered_results)} 个可用IP，配置分布：")
+        for config, count in config_stats.items():
+            print(f"  {config}: {count} 个IP")
+        print("详细结果：")
         for result in filtered_results:
-            print(f"{result['speed']:.3f} MB/s  {result['ip']}")
+            config_info = ""
+            if 'config' in result:
+                config_info = f" [{result['config']['isp']}-{result['config']['region']}]"
+            print(f"{result['speed']:.3f} MB/s  {result['ip']}{config_info}")
         
         # 合并模板文件
         self._merge_template_file(filtered_results)
     
     def _merge_template_file(self, results):
-        """合并模板文件"""
-        template_file = Path(f"template/{self.isp}/template_{self.city}.txt")
-        output_file = self.output_dir / f"{self.city}.txt"
-        
-        if not template_file.exists():
-            print(f"警告: 模板文件 {template_file} 不存在，跳过合并步骤")
+        """合并模板文件 - 支持多配置结果"""
+        if not results:
+            print("没有结果需要合并模板")
             return
-        
-        print(f"----合并列表文件到：{output_file}---------")
-        
-        try:
-            with open(template_file, 'r', encoding='utf-8') as tf:
-                template_content = tf.read()
             
-            with open(output_file, 'w', encoding='utf-8') as of:
-                for result in results:
-                    ip = result['ip']
-                    print(f"Processing IP: {ip} (Speed: {result['speed']:.3f} MB/s)")
-                    
-                    # 替换模板中的占位符
-                    content = template_content.replace('ipipip', ip)
-                    of.write(content)
-                    
-        except Exception as e:
-            print(f"合并模板文件失败: {e}")
+        # 按配置分组结果
+        config_groups = {}
+        for result in results:
+            if 'config' in result:
+                # 使用测试出的正确配置
+                config = result['config']
+                isp = config['isp']
+                city = config['city']
+            else:
+                # 使用默认配置
+                isp = self.isp
+                city = self.city
+                
+            key = f"{isp}_{city}"
+            if key not in config_groups:
+                config_groups[key] = {
+                    'isp': isp,
+                    'city': city,
+                    'results': []
+                }
+            config_groups[key]['results'].append(result)
+        
+        print(f"发现 {len(config_groups)} 种配置的结果，将分别生成文件：")
+        
+        # 为每种配置生成对应的文件
+        for key, group in config_groups.items():
+            isp = group['isp']
+            city = group['city']
+            group_results = group['results']
+            
+            print(f"  {isp}-{city}: {len(group_results)} 个IP")
+            
+            # 构建模板文件路径
+            template_file = Path(f"template/{isp}/template_{city}.txt")
+            
+            # 构建输出文件路径，确保目录存在
+            output_dir = Path(f"sum/{isp}")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"{city}.txt"
+            
+            if not template_file.exists():
+                print(f"    警告: 模板文件 {template_file} 不存在，跳过该组")
+                continue
+            
+            print(f"    合并列表文件到：{output_file}")
+            
+            try:
+                with open(template_file, 'r', encoding='utf-8') as tf:
+                    template_content = tf.read()
+                
+                with open(output_file, 'w', encoding='utf-8') as of:
+                    for result in group_results:
+                        ip = result['ip']
+                        config_info = ""
+                        if 'config' in result:
+                            config_info = f" ({result['config']['isp']}-{result['config']['region']})"
+                        print(f"    Processing IP: {ip} (Speed: {result['speed']:.3f} MB/s){config_info}")
+                        
+                        # 替换模板中的占位符
+                        content = template_content.replace('ipipip', ip)
+                        of.write(content)
+                        
+                print(f"    ✓ 成功生成 {output_file}")
+                        
+            except Exception as e:
+                print(f"    ✗ 合并模板文件失败: {e}")
     
     def _save_basic_results(self, udpxy_ips):
         """保存基本的IP检测结果（不进行流媒体测试时使用）"""
@@ -1997,18 +2401,28 @@ class IPTVSpeedTest:
         except Exception as e:
             print(f"保存基本结果失败: {e}")
     
-    def cleanup(self):
-        """清理临时文件"""
+    def cleanup(self, keep_logs=False):
+        """清理临时文件
+        
+        Args:
+            keep_logs: 是否保留日志文件（用于调试异常情况）
+        """
         temp_files = [
-            self.speedtest_log,
             "temp_video.mp4",
             "ffmpeg.log"
         ]
+        
+        # 只有在明确要求清理或正常完成时才删除日志文件
+        if not keep_logs:
+            temp_files.append(self.speedtest_log)
         
         for file_path in temp_files:
             if os.path.exists(file_path):
                 os.remove(file_path)
                 print(f"删除临时文件: {file_path}")
+        
+        if keep_logs and os.path.exists(self.speedtest_log):
+            print(f"保留日志文件用于调试: {self.speedtest_log}")
     
     def run(self):
         """运行完整的测试流程"""
@@ -2065,11 +2479,15 @@ class IPTVSpeedTest:
             
         except KeyboardInterrupt:
             print("\n用户中断程序")
+            # 用户中断时保留日志文件用于调试
+            self.cleanup(keep_logs=True)
         except Exception as e:
             print(f"程序执行出错: {e}")
-        finally:
-            # 5. 清理临时文件
-            self.cleanup()
+            # 异常时保留日志文件用于调试
+            self.cleanup(keep_logs=True)
+        else:
+            # 正常完成时清理所有临时文件
+            self.cleanup(keep_logs=False)
 
 
 def main():
@@ -2084,12 +2502,14 @@ def main():
   python speedtest_integrated_new.py Guangzhou Mobile
   python speedtest_integrated_new.py Shanghai Telecom --max-pages 5
   python speedtest_integrated_new.py Beijing Mobile --notest
+  python speedtest_integrated_new.py Hebei Telecom --fast
 
 运营商可选: Telecom, Unicom, Mobile
 
 参数说明:
   --max-pages: 限制搜索的最大页数
   --notest: 跳过流媒体测试，仅进行IP搜索和端口检测
+  --fast: 快速模式，只进行第一阶段默认配置测试，跳过第二阶段其他配置测试
         """
     )
     
@@ -2099,6 +2519,8 @@ def main():
                        help='最大翻页数限制 (默认: 10页)')
     parser.add_argument('--notest', action='store_true',
                        help='跳过流媒体测试和模板生成，仅进行IP搜索和端口检测')
+    parser.add_argument('--fast', action='store_true',
+                       help='快速模式：只进行第一阶段默认配置测试，跳过第二阶段其他配置测试')
     
     args = parser.parse_args()
     
@@ -2127,11 +2549,13 @@ def main():
     print(f"  最大翻页数: {args.max_pages}")
     if args.notest:
         print(f"  模式: 仅搜索模式（跳过流媒体测试）")
+    elif args.fast:
+        print(f"  模式: 快速测试模式（仅第一阶段默认配置测试）")
     else:
         print(f"  模式: 完整测试模式")
     
     # 创建测试实例并运行
-    speedtest = IPTVSpeedTest(args.region, args.isp, args.max_pages, args.notest)
+    speedtest = IPTVSpeedTest(args.region, args.isp, args.max_pages, args.notest, args.fast)
     speedtest.run()
 
 

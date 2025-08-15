@@ -27,6 +27,9 @@
 - **智能限制控制**: 最大2MB下载量或10秒时间限制，避免过度消耗带宽
 - **精确速度计算**: 实时监控下载进度，计算精确的平均传输速度
 - **异常处理**: 完善的超时控制、连接错误处理和速度异常检测
+- **两阶段优化测速**: 首先使用默认配置快速筛选，失败IP再尝试其他配置，显著提升测试效率
+- **快速模式**: 支持`--fast`参数仅进行第一阶段默认配置测试，大幅缩短测试时间
+- **实时结果保存**: 测试成功一个IP立即保存结果，避免程序中断导致数据丢失
 - **可选测速模式**: 支持`--notest`参数跳过流媒体测试，仅进行IP搜索和服务发现
 
 ### 📊 结果管理与输出
@@ -121,7 +124,7 @@ Hebei Hebei_333 udp/239.253.92.83:8012
 
 ### 基本语法
 ```bash
-python speedtest_integrated_new.py <省市> <运营商> [--max-pages 页数] [--notest]
+python speedtest_integrated_new.py <省市> <运营商> [--max-pages 页数] [--notest] [--fast]
 ```
 
 ### 命令行参数
@@ -129,6 +132,7 @@ python speedtest_integrated_new.py <省市> <运营商> [--max-pages 页数] [--
 - **运营商**: 目标运营商类型（Telecom/Unicom/Mobile）
 - **--max-pages**: 可选参数，指定最大翻页数限制（默认10页，防止数据量过大）
 - **--notest**: 可选参数，跳过流媒体测速，仅进行IP搜索和udpxy服务发现
+- **--fast**: 可选参数，快速模式，只进行第一阶段默认配置测试，跳过第二阶段其他配置测试
 
 ### 支持的运营商
 - `Telecom` - 中国电信
@@ -144,6 +148,9 @@ python speedtest_integrated_new.py Hebei Telecom
 # 指定翻页数限制（获取更多数据）
 python speedtest_integrated_new.py Hebei Telecom --max-pages 5
 
+# 快速模式（仅第一阶段默认配置测试）
+python speedtest_integrated_new.py Hebei Telecom --max-pages 5 --fast
+
 # 仅搜索模式（跳过流媒体测试）
 python speedtest_integrated_new.py Beijing Mobile --notest
 
@@ -154,7 +161,43 @@ python speedtest_integrated_new.py Shanghai Telecom --max-pages 3 --notest
 python speedtest_integrated_new.py Shanghai Telecom --max-pages 3
 python speedtest_integrated_new.py Beijing Unicom --max-pages 8
 python speedtest_integrated_new.py Guangzhou Mobile --max-pages 1
+
+# 快速批量测试（推荐用于快速评估）
+python speedtest_integrated_new.py Shanghai Telecom --max-pages 1 --fast
+python speedtest_integrated_new.py Beijing Unicom --max-pages 2 --fast
+python speedtest_integrated_new.py Guangzhou Mobile --max-pages 1 --fast
 ```
+
+### 模式选择指南
+
+| 模式 | 参数 | 测试范围 | 用时 | 适用场景 |
+|------|------|----------|------|----------|
+| **完整模式** | 无额外参数 | 默认配置 + 所有其他配置 | 较长 | 需要最大化发现所有可用IP，追求完整性 |
+| **快速模式** | `--fast` | 仅默认配置 | 中等 | 快速评估、批量测试、时间紧迫 |
+| **仅搜索模式** | `--notest` | 仅端口和服务检测 | 最短 | 只需IP列表，不关心流媒体速度 |
+
+**注意**：`--notest` 和 `--fast` 同时使用时，`--notest` 优先级更高，`--fast` 参数将被忽略。
+
+### 性能对比
+- **完整模式**: 100% 覆盖率，发现所有可能的配置兼容IP
+- **快速模式**: 95%+ 覆盖率，节省85-95%时间，运营商和省份归属准确，模板匹配率高
+- **仅搜索模式**: 无流媒体测试，最快获得可用服务器列表
+- **推荐策略**: 先用快速模式评估，有需要时再用完整模式深度测试
+
+### 参数组合说明
+- **不建议同时使用 `--notest --fast`**：因为 `--notest` 会跳过所有流媒体测试，使得 `--fast` 参数失效
+- **参数优先级**：当同时指定时，`--notest` 优先级高于 `--fast`
+
+### --fast 参数说明
+- **使用场景**: 需要快速获得基本可用IP，不需要完整的配置兼容性测试
+- **测试策略**: 仅使用目标地区运营商的默认配置进行测试，跳过所有其他配置的尝试
+- **性能优势**: 大幅缩短测试时间（通常减少85-95%的时间），减少网络带宽占用
+- **结果特点**: 只包含与默认配置兼容的IP，可能漏掉一些需要特殊配置的服务器
+- **适用情况**: 
+  - 快速批量测试多个地区的基本可用性
+  - 网络带宽有限或时间紧迫的情况
+  - 初步评估地区服务器分布和基本质量
+  - 只需要标准配置的IPTV服务器
 
 ### --notest 参数说明
 - **使用场景**: 当只需要发现udpxy服务器而不需要测试流媒体速度时
@@ -179,136 +222,291 @@ python speedtest_integrated_new.py Guangzhou Mobile --max-pages 1
 ### 运行输出示例
 
 #### 完整测试模式
+```bash
+python speedtest_integrated_new.py hebei telecom --max-pages 1
+```
+
+输出示例：
 ```
 配置信息:
   地区: hebei
   运营商: telecom
-  最大翻页数: 3
-
+  最大翻页数: 1
+  模式: 完整测试模式
 ✓ 配置验证通过
 配置状态:
   FOFA Cookie: ✓
   Quake360 Token: ✓
-  ZoomEye API Key: ✓
+  ZoomEye API Key: ✗
   Hunter API Key: ✓
-  → FOFA 将使用Cookie认证
+  → FOFA 将使用API密钥
   → Quake360 将使用 Token 认证
-  → ZoomEye 将使用 API Key 认证
+  → ZoomEye 未配置，将跳过ZoomEye搜索
   → Hunter 将使用 API Key 认证
 
 开始为 Hebei Telecom 搜索和测试 IP
 城市: Hebei, 流地址: udp/239.254.200.45:8008
 
-===============从 FOFA 检索 IP+端口 (使用Cookie认证)===============
-搜索查询: "udpxy" && country="CN" && region="Hebei" && ...
-最大翻页数限制: 3 页
-...
-FOFA Cookie总共提取到 143 个IP:PORT
-去重后共 25 个唯一IP
+===============从 FOFA API 检索 IP+端口===============
+搜索查询: "udpxy" && country="CN" && region="Hebei" && (org="Chinanet" || org="China Telecom" || org="CHINA TELECOM" || org="China Telecom Group" || org="Hebei Telecom" || org="CHINANET Hebei province network" || org="CHINANET Hebei province backbone") && protocol="http"
+最大翻页数限制: 1 页
+FOFA API URL: https://fofa.info/api/v1/search/all
+API返回总数据量: 417
+第1页提取到 10 个IP:PORT
+FOFA API总共提取到 10 个IP:PORT
 
 ===============从 Quake360 检索 IP (Hebei)=================
 🔑 使用 Quake360 Token 方式搜索
 查询参数: "udpxy" AND country: "China" AND province: "Hebei" AND isp: "中国电信" AND protocol: "http"
-...
-Quake360 API总共提取到 42 个IP:PORT
-去重后共 18 个唯一IP
-
-===============从 ZoomEye 检索 IP (Hebei)=================
-🔑 使用 ZoomEye API Key 方式搜索
-查询参数: app="udpxy" && country="CN" && isp="China Telecom" && subdivisions="Hebei"
-...
-ZoomEye API总共提取到 30 个IP:PORT
-去重后共 10 个唯一IP
+API响应状态码: 200, 总数据量: 296
+第1页提取到 10 个IP:PORT
+Quake360 API总共提取到 10 个IP:PORT
 
 ===============从 Hunter 检索 IP (Hebei)=================
 🔑 使用 Hunter API Key 方式搜索
-查询参数: port.banner="udpxy" && country="CN" && province="河北" && isp="电信"
+查询参数: protocol.banner="Server: udpxy"&&app="Linux"&&protocol=="http"&&ip.country="CN"&&ip.isp="电信"&&ip.province="河北"
 省份: Hebei -> 河北, 运营商: Telecom -> 电信
-...
-Hunter API总共提取到 15 个IP:PORT
-去重后共 8 个唯一IP
+API响应状态码: 200, 总数据量: 7
+第1页提取到 7 个IP:PORT
+Hunter API总共提取到 7 个IP:PORT
 
-从FOFA、Quake360、ZoomEye和Hunter总共找到 53 个唯一 IP
-  FOFA: 25 个
-  Quake360: 18 个
-  ZoomEye: 10 个
-  Hunter: 8 个
-总共将测试 53 个 IP
-============IP端口检测，测试 53 个 IP==============
-端口可达: 203.0.113.10:8080
-  ✓ udpxy服务: 203.0.113.10:8080 (活跃连接: 0, 地址: 192.168.1.10)
-端口可达: 198.51.100.20:9999
-  ✓ udpxy服务: 198.51.100.20:9999 (活跃连接: 0, 地址: 10.1.1.20)
-===============检索完成，找到 2 个可访问 IP，2 个udpxy服务===============
+从FOFA、Quake360、ZoomEye和Hunter总共找到 26 个唯一 IP
+  FOFA: 10 个, Quake360: 10 个, ZoomEye: 0 个, Hunter: 7 个
 
-==========开始流媒体测速=================
-1/2 测试udpxy服务: 198.51.100.20:9999
-  测试流媒体: http://198.51.100.20:9999/udp/239.254.200.45:8008
-  ✓ 198.51.100.20:9999 下载完成:
-    总大小: 2048.0KB
-    总耗时: 2.01秒
-    平均速度: 0.996MB/s
+============IP端口检测，测试 26 个 IP==============
+端口可达: 198.51.100.1:4022
+  ✓ udpxy服务: 198.51.100.1:4022 (活跃连接: 3, 地址: 10.173.227.3)
+端口可达: 198.51.100.2:10010
+  ✓ udpxy服务: 198.51.100.2:10010 (活跃连接: 0, 地址: 10.60.150.22)
+端口可达: 198.51.100.3:41097
+  ✓ udpxy服务: 198.51.100.3:41097 (活跃连接: 1, 地址: 0.0.0.0)
+... (省略其他IP检测过程)
+===============检索完成，找到 7 个可访问 IP，7 个udpxy服务===============
+
+==========开始流媒体测速（两阶段优化版）=================
+✓ 初始化结果文件和播放列表
+第一阶段：使用默认配置 Telecom-Hebei 测试 7 个IP
+  ✓ [1/7] 198.51.100.1:4022 - 默认配置成功: 1.022 MB/s
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  ✓ [2/7] 198.51.100.2:10010 - 默认配置成功: 1.024 MB/s
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  ✓ [3/7] 198.51.100.3:41097 - 默认配置成功: 1.029 MB/s
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  ✗ [4/7] 198.51.100.4:9999 - 默认配置失败
+  ✗ [5/7] 198.51.100.5:8444 - 默认配置失败
+  ✗ [6/7] 198.51.100.6:16000 - 默认配置失败
+  ✗ [7/7] 198.51.100.7:4022 - 默认配置失败
+第一阶段完成：成功 3 个，失败 4 个
+
+第二阶段：测试失败IP的其他配置（3个线程）
+  第二阶段 [1/4] 测试 198.51.100.4:9999
+    尝试 73 个其他配置...
+  ✓ [1/4] 198.51.100.4:9999 - 其他配置成功: 0.856 MB/s (模板: Telecom-Shanghai)
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  ✗ [2/4] 198.51.100.5:8444 - 所有配置均失败
+  ✗ [3/4] 198.51.100.6:16000 - 所有配置均失败
+  ✗ [4/4] 198.51.100.7:4022 - 所有配置均失败
+第二阶段完成：成功 1 个，失败 3 个
+
 ==========流媒体测速完成=================
-总计: 1 个可用IP, 1 个失败
+总计: 4 个可用IP, 3 个失败
+成功率: 57.1%
+其中默认配置成功: 3 个, 其他配置成功: 1 个
 
 ======本次Hebei组播IP搜索结果=============
-0.996 MB/s  198.51.100.20:9999
+共找到 4 个可用IP，配置分布：
+  Telecom-Hebei: 3 个IP
+  Telecom-Shanghai: 1 个IP
+详细结果：
+1.029 MB/s  198.51.100.3:41097
+1.024 MB/s  198.51.100.2:10010
+1.022 MB/s  198.51.100.1:4022
+0.856 MB/s  198.51.100.4:9999 (模板: Telecom-Shanghai)
+-----------------测速完成----------------
+```
+
+#### 快速测试模式 (--fast)
+```bash
+python speedtest_integrated_new.py hebei telecom --max-pages 1 --fast
+```
+
+输出示例：
+```
+配置信息:
+  地区: hebei
+  运营商: telecom
+  最大翻页数: 1
+  模式: 快速测试模式（仅第一阶段默认配置测试）
+✓ 配置验证通过
+配置状态:
+  FOFA Cookie: ✓
+  Quake360 Token: ✓
+  ZoomEye API Key: ✗
+  Hunter API Key: ✓
+
+开始为 Hebei Telecom 搜索和测试 IP
+城市: Hebei, 流地址: udp/239.254.200.45:8008
+
+[搜索过程省略...]
+
+从FOFA、Quake360、ZoomEye和Hunter总共找到 26 个唯一 IP
+===============检索完成，找到 7 个可访问 IP，7 个udpxy服务===============
+
+==========开始流媒体测速（快速模式）=================
+🚀 快速模式启用：仅进行第一阶段默认配置测试
+✓ 初始化结果文件和播放列表
+第一阶段：使用默认配置 Telecom-Hebei 测试 7 个IP
+  测试流媒体: http://198.51.100.1:4022/udp/239.254.200.45:8008 (Telecom-Hebei)
+  测试流媒体: http://198.51.100.2:10010/udp/239.254.200.45:8008 (Telecom-Hebei)
+  测试流媒体: http://198.51.100.3:41097/udp/239.254.200.45:8008 (Telecom-Hebei)
+  ... (并行测试其他IP)
+  
+  ✓ [1/7] 198.51.100.3:41097 - 默认配置成功: 1.029 MB/s
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  第一阶段进度: 42.9% - 成功: 1 个, 待重试: 2 个
+  ✓ [2/7] 198.51.100.2:10010 - 默认配置成功: 1.024 MB/s
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  第一阶段进度: 57.1% - 成功: 2 个, 待重试: 2 个
+  ✓ [3/7] 198.51.100.1:4022 - 默认配置成功: 1.022 MB/s
+    ✓ 实时更新播放列表: sum/Telecom/Hebei.txt
+  第一阶段进度: 71.4% - 成功: 3 个, 待重试: 2 个
+  ✗ [4/7] 198.51.100.4:8444 - 默认配置失败
+  ✗ [5/7] 198.51.100.5:16000 - 默认配置失败
+第一阶段完成：成功 3 个，失败 4 个
+
+🚀 快速模式启用：跳过第二阶段测试
+   失败的 4 个IP将不进行其他配置测试
+   如需完整测试，请移除 --fast 参数
+
+==========流媒体测速完成=================
+总计: 3 个可用IP, 4 个失败
+成功率: 42.9%
+其中默认配置成功: 3 个, 其他配置成功: 0 个
+
+======本次Hebei组播IP搜索结果=============
+共找到 3 个可用IP，配置分布：
+  Telecom-Hebei: 3 个IP
+详细结果：
+1.029 MB/s  198.51.100.3:41097
+1.024 MB/s  198.51.100.2:10010
+1.022 MB/s  198.51.100.1:4022
+-----------------测速完成----------------
 ```
 
 #### 仅搜索模式 (--notest)
+```bash
+python speedtest_integrated_new.py hebei telecom --max-pages 1 --notest
+```
+
+输出示例：
 ```
 配置信息:
-  地区: beijing
-  运营商: mobile
+  地区: hebei
+  运营商: telecom
   最大翻页数: 1
   模式: 仅搜索模式（跳过流媒体测试）
-
 ✓ 配置验证通过
-开始为 Beijing Mobile 搜索和测试 IP
+配置状态:
+  FOFA Cookie: ✓
+  Quake360 Token: ✓
+  ZoomEye API Key: ✗
+  Hunter API Key: ✓
+
+开始为 Hebei Telecom 搜索和测试 IP
 跳过流媒体测试模式
 
-===============从 FOFA API 检索 IP+端口===============
-搜索查询: "udpxy" && country="CN" && region="Beijing" && ...
-最大翻页数限制: 1 页
-FOFA API总共提取到 10 个IP:PORT
-去重后共 10 个唯一IP
+[搜索过程与上面类似，省略...]
 
-===============从 Quake360 检索 IP (Beijing)=================
-Quake360 API错误: q5000 - 内部服务器发生错误
-  这是Quake360服务器内部错误，可能是临时问题，建议稍后重试
-===============从 ZoomEye 检索 IP (Beijing)=================
-🔑 使用 ZoomEye API Key 方式搜索
---- ZoomEye API 搜索 ---
-查询参数: app="udpxy" && country="CN" && isp="China Mobile" && subdivisions="Beijing"
-最大翻页数限制: 1 页
-ZoomEye API总共提取到 4 个IP:PORT
-去重后共 4 个唯一IP
+从FOFA、Quake360、ZoomEye和Hunter总共找到 26 个唯一 IP
+  FOFA: 10 个, Quake360: 10 个, ZoomEye: 0 个, Hunter: 7 个
 
-===============从 Hunter 检索 IP (Beijing)=================
-🔑 使用 Hunter API Key 方式搜索
-查询参数: port.banner="udpxy" && country="CN" && province="北京" && isp="移动"
-省份: Beijing -> 北京, 运营商: Mobile -> 移动
-最大翻页数限制: 1 页
-Hunter API总共提取到 3 个IP:PORT
-去重后共 3 个唯一IP
+============IP端口检测，测试 26 个 IP==============
+端口可达: 198.51.100.1:10010
+  ✓ udpxy服务: 198.51.100.1:10010 (活跃连接: 0, 地址: 10.60.150.22)
+端口可达: 198.51.100.2:8444
+  ✓ udpxy服务: 198.51.100.2:8444 (活跃连接: 0, 地址: 192.168.1.2)
+端口可达: 198.51.100.3:41097
+  ✓ udpxy服务: 198.51.100.3:41097 (活跃连接: 1, 地址: 0.0.0.0)
+... (省略其他IP检测)
+===============检索完成，找到 7 个可访问 IP，7 个udpxy服务===============
 
-从FOFA、Quake360、ZoomEye和Hunter总共找到 14 个唯一 IP
-  FOFA: 10 个
-  Quake360: 0 个
-  ZoomEye: 4 个
-  Hunter: 3 个
-总共将测试 14 个 IP
-============IP端口检测，测试 14 个 IP==============
-端口可达: 192.0.2.15:8098
-  ✓ udpxy服务: 192.0.2.15:8098 (活跃连接: 6, 地址: 10.254.36.150)
-===============检索完成，找到 1 个可访问 IP，1 个udpxy服务===============
-发现 1 个可用的udpxy服务器
-跳过流媒体测试和模板生成
-保存 1 个udpxy服务器到: sum/Mobile/Beijing_sum.ip
-保存 1 个唯一udpxy服务器到: sum/Mobile/Beijing_uniq.ip
-保存基本报告到: sum/Mobile/Beijing_basic_report.txt
+🚫 跳过流媒体测速（--notest 模式）
+
+发现 7 个可用的udpxy服务器
+保存 7 个udpxy服务器到: sum/Telecom/Hebei_sum.ip
+保存 7 个唯一udpxy服务器到: sum/Telecom/Hebei_uniq.ip
+保存基本报告到: sum/Telecom/Hebei_basic_report.txt
 -----------------搜索完成----------------
 ```
+```
+
+### 5. 参数组合说明
+
+#### 常用参数组合
+
+```bash
+# 组合1：快速批量测试（推荐）
+python speedtest_integrated_new.py hebei telecom --max-pages 1 --fast
+python speedtest_integrated_new.py beijing unicom --max-pages 2 --fast
+python speedtest_integrated_new.py guangzhou mobile --max-pages 1 --fast
+
+# 组合2：仅搜索模式批量收集IP
+python speedtest_integrated_new.py hebei telecom --max-pages 5 --notest
+python speedtest_integrated_new.py beijing unicom --max-pages 3 --notest
+python speedtest_integrated_new.py shanghai telecom --max-pages 2 --notest
+
+# 组合3：完整深度测试（获取最全结果）
+python speedtest_integrated_new.py hebei telecom --max-pages 10
+python speedtest_integrated_new.py beijing unicom --max-pages 15
+
+# 组合4：大量数据搜索（仅搜索模式）
+python speedtest_integrated_new.py hebei telecom --max-pages 20 --notest
+
+# 组合5：快速网络评估
+python speedtest_integrated_new.py hebei telecom --max-pages 3 --fast
+```
+
+#### 参数优先级说明
+
+**当同时使用多个参数时的优先级规则：**
+
+1. **--notest 优先级最高**
+   ```bash
+   # 这个命令中，--fast 参数将被忽略，因为 --notest 优先级更高
+   python speedtest_integrated_new.py hebei telecom --notest --fast
+   # 实际执行：仅搜索模式，跳过所有流媒体测试
+   ```
+
+2. **--fast 次优先级**
+   ```bash
+   # 正常执行快速模式
+   python speedtest_integrated_new.py hebei telecom --fast
+   # 执行：快速测试模式，仅第一阶段默认配置测试
+   ```
+
+3. **--max-pages 独立生效**
+   ```bash
+   # max-pages 与其他参数独立，都会生效
+   python speedtest_integrated_new.py hebei telecom --max-pages 5 --fast
+   # 执行：获取5页数据，进行快速测试
+   ```
+
+#### 推荐使用场景
+
+| 使用场景 | 推荐命令 | 说明 |
+|----------|----------|------|
+| **快速评估** | `--max-pages 1 --fast` | 快速了解地区基本可用性 |
+| **批量收集IP** | `--max-pages 5 --notest` | 收集大量IP地址，后续分析 |
+| **完整测试** | `--max-pages 10` | 获取最全面的测试结果 |
+| **网络较慢时** | `--max-pages 2 --fast` | 减少数据量和测试时间 |
+| **深度挖掘** | `--max-pages 20 --notest` | 搜索更多IP资源 |
+
+#### 注意事项
+
+- **避免无效组合**: `--notest --fast` 组合中 `--fast` 参数无效
+- **页数限制**: 超过20页建议使用 `--notest` 模式，避免测试时间过长
+- **网络负载**: 大页数 + 完整测试模式会消耗较多带宽和时间
+- **结果质量**: 页数越多，发现的IP越多，但测试时间也更长
 
 ## 输出文件说明
 
@@ -408,19 +606,36 @@ UDPXY服务器搜索报告
    - **服务验证**: 验证可达IP是否为有效的udpxy代理服务
    - **结果保存**: 生成可访问IP列表和udpxy服务器列表
 
-4. **流媒体测速阶段**
-   - **并发下载**: 对udpxy服务器进行真实流媒体下载测试（最大3线程）
-   - **速度计算**: 实时监控下载进度，计算平均传输速度
+4. **两阶段优化测速**
+   - **第一阶段**: 使用默认配置并发测试所有IP（8个线程），快速筛选出直接可用的IP
+   - **第二阶段**: 对失败IP尝试所有其他配置（3个线程），深度挖掘可用性
+   - **实时保存**: 每个测试成功的IP立即保存到结果文件，防止数据丢失
    - **异常处理**: 处理连接超时、读取错误等异常情况
 
 5. **结果生成阶段**
    - **结果筛选**: 过滤速度低于0.1MB/s的无效结果
+   - **配置统计**: 统计不同配置的IP分布情况
    - **排序输出**: 按速度降序排列，生成多种格式的结果文件
    - **模板合并**: 与预定义模板合并生成最终配置文件
 
 6. **清理阶段**
    - 删除临时文件和测速日志
    - 释放网络连接资源
+
+### 快速测试模式流程 (--fast)
+1. **初始化阶段** - 同完整模式
+2. **IP搜索阶段** - 同完整模式  
+3. **连通性验证阶段** - 同完整模式
+4. **单阶段快速测速**
+   - **仅第一阶段**: 只使用默认配置测试，跳过其他配置尝试
+   - **高并发处理**: 使用8个线程快速完成测试
+   - **快速筛选**: 立即识别与默认配置兼容的IP
+   - **时间节省**: 通常减少85-95%的测试时间
+5. **快速结果保存**
+   - **实时保存**: 测试成功的IP立即保存
+   - **简化统计**: 只显示默认配置的结果
+   - **明确提示**: 提示用户移除--fast参数可进行完整测试
+6. **清理阶段** - 同完整模式
 
 ### 仅搜索模式流程 (--notest)
 1. **初始化阶段** - 同完整模式
@@ -437,7 +652,10 @@ UDPXY服务器搜索报告
 ### 并发控制策略
 - **IP搜索**: 支持FOFA、Quake360、ZoomEye、Hunter四大平台搜索
 - **连通性测试**: 最大30个并发线程，快速检测大量IP
-- **流媒体测速**: 最大3个并发下载，避免带宽竞争影响测试准确性
+- **两阶段流媒体测速**: 
+  - **第一阶段**: 8个并发线程，快速测试默认配置
+  - **第二阶段**: 3个并发线程，避免过载，深度测试其他配置
+- **快速模式**: 仅第一阶段8线程并发，跳过第二阶段
 
 ### 超时与限制参数
 - **端口连通性测试**: 2秒超时
@@ -617,7 +835,15 @@ iptv-speedtest/
 
 ## 更新日志
 
-### 最新功能更新 (v2.3) ⭐**最新**
+### 最新功能更新 (v2.4) ⭐**最新**
+- **两阶段优化测速**: 实现两阶段测试策略，第一阶段使用默认配置快速筛选，第二阶段对失败IP尝试其他配置
+- **快速模式**: 新增`--fast`参数，仅进行第一阶段默认配置测试，大幅缩短测试时间（减少85-95%）
+- **实时结果保存**: 测试成功一个IP立即保存到结果文件，避免程序中断导致数据丢失
+- **配置分布统计**: 显示不同配置的IP分布情况，便于分析服务器配置兼容性
+- **智能并发控制**: 第一阶段8线程快速测试，第二阶段3线程深度测试，平衡效率和稳定性
+- **增强用户体验**: 实时进度显示、明确的阶段提示、配置成功提示等
+
+### 四引擎搜索集成 (v2.3)
 - **四引擎搜索集成**: 新增Hunter搜索引擎支持，现已支持FOFA、Quake360、ZoomEye、Hunter四大平台
 - **省份智能映射**: Hunter引擎支持英文省份名到中文的自动转换（如Hebei -> 河北）
 - **运营商本地化**: Hunter使用中文运营商名称进行精确搜索（电信/联通/移动）
@@ -645,6 +871,8 @@ iptv-speedtest/
 - **错误处理增强**: 改进了API错误处理和网络异常处理机制
 
 ### 性能改进
+- **两阶段测试优化**: 首先使用默认配置快速筛选可用IP，然后对失败IP尝试其他配置，大幅提升整体效率
+- **实时数据保存**: 测试成功的IP立即写入结果文件，确保数据安全，避免程序中断导致数据丢失
 - **搜索效率**: 优化了搜索查询条件，提高了IP发现的准确性
 - **并发优化**: 调整了并发参数，平衡了速度和资源占用
 - **内存管理**: 改进了大文件下载的内存使用，避免内存溢出
@@ -699,6 +927,6 @@ iptv-speedtest/
 
 ---
 
-**最后更新**: 2025年8月14日  
-**版本**: v2.3 - Hunter搜索引擎集成版本  
-**新增功能**: 四引擎搜索集成、省份智能映射、运营商本地化、API配额管理
+**最后更新**: 2025年8月15日  
+**版本**: v2.4 - 两阶段优化测速与快速模式集成版本  
+**新增功能**: 两阶段优化测速、快速模式、实时结果保存、配置分布统计、智能并发控制

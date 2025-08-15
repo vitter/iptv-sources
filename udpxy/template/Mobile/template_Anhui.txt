@@ -1,0 +1,5 @@
+CCTV13,http://ipipip/udp/239.253.7.5:1025
+CCTV14,http://ipipip/udp/239.253.7.98:1025
+安徽卫视,http://ipipip/udp/239.253.7.2:1025
+山东卫视,http://ipipip/udp/239.253.7.69:1025
+浙江卫视,http://ipipip/udp/239.253.7.80:1025
