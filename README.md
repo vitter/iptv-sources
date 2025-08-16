@@ -17,7 +17,7 @@ iptv-sources/
 
 ### 📡 多源获取与探测
 - **Hotels**: 支持jsmpeg、txiptv、zhgxtv三种IPTV服务器类型的批量探测
-- **mobileunicast**: 从27个优质移动网络源下载并合并频道
+- **mobileunicast**: 从37个优质移动网络源下载并合并频道
 - **udpxy**: 通过FOFA、Quake360、ZoomEye和Hunter四大搜索引擎搜索udpxy代理服务器
 - **ISP**: 从预定义源列表下载直播源文件
 
@@ -46,21 +46,25 @@ iptv-sources/
 **适用场景**: 已知IPTV服务器类型，需要批量扫描同网段服务器
 
 **主要特性**:
+- **四引擎搜索**: 集成FOFA、360 Quake、ZoomEye、Hunter四大搜索引擎
 - 支持三种主流IPTV服务器类型（jsmpeg、txiptv、zhgxtv）
+- **智能翻页**: 自动翻页获取全部搜索结果，支持自定义最大翻页数限制
+- **时间过滤**: 支持按时间范围搜索最新的IPTV源
+- **地理位置过滤**: 支持按省份和运营商精确筛选搜索结果
 - 智能C段网络扫描（如192.168.1.1-254）
 - 异步并发处理，最高500个并发会话
 - 自动频道名称标准化（CCTV、卫视等）
 
 **使用方法**:
 ```bash
-# 单模式扫描
+# 单模式扫描（需要.env配置文件）
 python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv
 
 # 多模式组合
 python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv
 
-# 自定义输出
-python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output my_channels
+# 自定义输出和翻页数
+python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output my_channels --max-pages 5
 ```
 
 **输出文件**:
@@ -74,10 +78,13 @@ python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output my_channels
 **适用场景**: 需要按运营商对IPTV源进行分类管理
 
 **主要特性**:
+- **多API支持**: 使用多个IP查询API提高成功率（ip-api.com、ipapi.co、ipinfo.io）
 - 通过API自动识别IP所属运营商（电信/联通/移动/铁通/教育网/广电网/其他/未知）
-- 运营商+频道类型双级分组
+- **运营商+频道类型双级分组**: 第一层按运营商分组，第二层按频道类型分组
 - 支持--noisp参数跳过运营商查询（类似unicast.py）
-- 智能去重查询，相同IP只查询一次
+- **智能去重查询**: 相同IP只查询一次，避免重复请求
+- **域名推测**: 当API查询失败时，根据域名特征推测运营商
+- **限流控制**: 使用较低的并发数避免API限制
 
 **使用方法**:
 ```bash
@@ -105,7 +112,8 @@ python isp.py --top 20 --noisp
 **适用场景**: 获取和优化移动网络的IPTV直播源
 
 **主要特性**:
-- 从27个优质移动网络源自动下载
+- 从37个优质移动网络源自动下载
+- **代理支持**: 支持通过HTTP/HTTPS代理下载URL列表（仅下载时使用）
 - 涵盖全国各省移动网络
 - 智能频道分类和去重
 - 优化的测速算法，3线程并发避免网络拥堵
@@ -117,12 +125,15 @@ python unicast.py
 
 # 自定义保留源数量
 python unicast.py --top 5
+
+# 使用代理下载URL列表
+python unicast.py --top 20 --proxy http://127.0.0.1:10808
 ```
 
 **数据源覆盖**:
 - live.zbds.org (5个源)
 - chinaiptv.pages.dev (12个省份源)
-- 其他优质源 (10个源)
+- 其他优质源 (20个源)
 
 **输出文件**:
 - `output/unicast_result.m3u` / `output/unicast_result.txt`
@@ -136,10 +147,15 @@ python unicast.py --top 5
 **适用场景**: 搜索和测试特定地区运营商的udpxy代理服务器
 
 **主要特性**:
-- 集成FOFA、Quake360、ZoomEye和Hunter四大搜索引擎
-- API密钥优先，Cookie备用的双重认证机制
-- 真实流媒体环境测速
-- 支持翻页获取大量数据（默认10页限制）
+- **四引擎集成**: FOFA、Quake360、ZoomEye和Hunter四大搜索引擎
+- **Hunter引擎**: 新增Hunter搜索引擎支持⭐
+- **智能认证**: API密钥优先，Cookie备用的双重认证机制
+- **多页数据获取**: 支持翻页获取大量数据（默认10页限制）
+- **真实流媒体测速**: 直接下载IPTV流媒体数据进行速度测试
+- **两阶段优化测速**: 默认配置快速筛选，失败IP再尝试其他配置
+- **快速模式**: 支持`--fast`参数仅进行第一阶段测试，大幅缩短时间
+- **可选测速**: 支持`--notest`参数跳过流媒体测试，仅进行IP搜索
+- **实时保存**: 测试成功一个IP立即保存结果，避免数据丢失
 
 **使用方法**:
 ```bash
@@ -148,17 +164,23 @@ python speedtest_integrated_new.py Hebei Telecom
 
 # 指定翻页数
 python speedtest_integrated_new.py Shanghai Unicom --max-pages 5
+
+# 快速模式（仅第一阶段测试）
+python speedtest_integrated_new.py Beijing Mobile --fast
+
+# 仅搜索不测速
+python speedtest_integrated_new.py Guangdong Telecom --notest
 ```
 
 **配置要求**:
 ```env
 # .env文件配置
-QUAKE360_TOKEN=your_token    # 可选
-FOFA_COOKIE=your_cookie
-FOFA_API_KEY=your_api_key    # 可选
-ZOOMEYE_API_KEY=your_key     # 可选
-HUNTER_API_KEY=your_key      # 可选，新增支持
-FOFA_USER_AGENT=Mozilla/5.0...
+FOFA_COOKIE=your_cookie          # 推荐，免费
+FOFA_API_KEY=your_api_key        # 可选，付费
+QUAKE360_TOKEN=your_token        # 可选，付费
+ZOOMEYE_API_KEY=your_key         # 可选，付费
+HUNTER_API_KEY=your_key          # 可选，付费，⭐新增
+FOFA_USER_AGENT=Mozilla/5.0...   # 配合Cookie使用
 ```
 
 **输出文件**:
@@ -172,7 +194,7 @@ FOFA_USER_AGENT=Mozilla/5.0...
 |------|--------|----------|----------|----------|
 | **Hotels** | IP段扫描 | 并发测速 | 频道类型 | 已知服务器批量扫描 |
 | **ISP** | 预定义源 | 并发测速 | 运营商+频道类型 | 运营商分类管理 |
-| **mobileunicast** | 27个移动源 | 优化测速 | 频道类型 | 移动网络源优化 |
+| **mobileunicast** | 37个移动源 | 优化测速 | 频道类型 | 移动网络源优化 |
 | **udpxy** | 搜索引擎 | 真实流测速 | 速度排序 | udpxy代理发现 |
 
 ## 🔧 安装与配置
