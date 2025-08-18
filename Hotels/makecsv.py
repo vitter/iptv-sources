@@ -9,6 +9,9 @@ IPTV 源数据获取与合并工具
 4. 更新CSV文件
 5. 支持按省份和运营商过滤搜索结果
 
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
+
 用法：
 单模式：python makecsv.py --jsmpeg jsmpeg_hosts.csv
 多模式：python makecsv.py --jsmpeg jsmpeg_hosts.csv --txiptv txiptv_hosts.csv --zhgxtv zhgxtv_hosts.csv

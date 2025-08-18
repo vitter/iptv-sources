@@ -1,5 +1,8 @@
 # IPTV组播文件下载器
 
+**项目主页**: https://github.com/vitter/iptv-sources  
+**问题反馈**: https://github.com/vitter/iptv-sources/issues
+
 ## 功能说明
 
 从 https://chinaiptv.pages.dev/ 网站下载三大运营商的组播文件，并按要求处理生成模板文件和配置文件。

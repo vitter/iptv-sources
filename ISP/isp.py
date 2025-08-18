@@ -12,6 +12,9 @@ IPTV直播源按运营商分组工具
 用法：
 python isp.py --top 20                    # 按运营商和频道类型两级分组
 python isp.py --top 20 --noisp           # 仅按频道类型分组（类似unicast.py）
+
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
 """
 
 import requests

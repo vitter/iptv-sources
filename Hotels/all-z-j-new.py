@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+IPTV服务器批量扫描工具
+
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
+"""
+
 import argparse
 import time
 import datetime

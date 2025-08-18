@@ -1,5 +1,8 @@
 # IPTV(udpxy) IP 搜索与测速综合工具
 
+**项目主页**: https://github.com/vitter/iptv-sources  
+**问题反馈**: https://github.com/vitter/iptv-sources/issues
+
 ## 项目简介
 
 这是一个专业的IPTV服务器发现和性能测试工具，集成了多个搜索引擎和完整的测试流程。通过FOFA、Quake360、ZoomEye和Hunter平台搜索指定地区运营商的udpxy代理服务器，并进行全面的连通性测试和流媒体速度评估。

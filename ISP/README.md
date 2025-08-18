@@ -1,5 +1,8 @@
 # IPTV直播源按运营商分组工具 (isp.py)
 
+**项目主页**: https://github.com/vitter/iptv-sources  
+**问题反馈**: https://github.com/vitter/iptv-sources/issues
+
 ## 功能说明
 
 本工具基于 unicast.py 的逻辑，实现按视频源 URL 地址 IP 所在运营商进行分组的 IPTV 直播源处理功能。

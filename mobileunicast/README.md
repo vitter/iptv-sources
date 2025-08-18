@@ -2,6 +2,9 @@
 
 一个功能完整的IPTV直播源下载、合并、测速与分组工具，用于从多个URL下载直播源，进行速度测试并重新分组输出。
 
+**项目主页**: https://github.com/vitter/iptv-sources  
+**问题反馈**: https://github.com/vitter/iptv-sources/issues
+
 ## 🚀 功能特性
 
 - **多源下载**: 从37个不同的直播源URL下载频道列表

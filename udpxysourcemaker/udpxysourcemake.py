@@ -18,6 +18,9 @@ UDPXY 源生成器
     python3 udpxysourcemake.py 192.168.1.100:8098 --notest
     python3 udpxysourcemake.py 192.168.1.100:8098 --test-count 10
     python3 udpxysourcemake.py 192.168.1.100:8098 --proxy http://127.0.0.1:10808
+
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
 """
 
 import argparse

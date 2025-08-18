@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""IPTV组播文件下载器"""
+"""
+IPTV组播文件下载器
+
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
+"""
 
 import requests
 import re

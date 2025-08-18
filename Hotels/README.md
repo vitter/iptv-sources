@@ -2,6 +2,9 @@
 
 这是一个功能强大的IPTV源数据获取与合并工具，支持从多个网络空间搜索引擎中自动收集IPTV服务器信息，并提供全面的数据处理和优化功能。
 
+**项目主页**: https://github.com/vitter/iptv-sources  
+**问题反馈**: https://github.com/vitter/iptv-sources/issues
+
 ## 🚀 功能特点
 
 - **六种搜索方式**：集成FOFA API/Cookie、360 Quake、ZoomEye API/Cookie、Hunter等搜索引擎

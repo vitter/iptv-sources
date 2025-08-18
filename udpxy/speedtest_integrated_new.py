@@ -14,6 +14,9 @@ IPTV(udpxy) IP 搜索与测速综合工具 - 新版本
 3. HTTP/M3U8 流媒体测速
 4. 生成结果文件
 
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
+
 用法：
 python speedtest_integrated_new.py <省市> <运营商>
 例如：python speedtest_integrated_new.py Shanghai Telecom

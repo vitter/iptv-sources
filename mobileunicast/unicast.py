@@ -12,6 +12,9 @@ IPTV直播源下载、合并、测速与分组工具
 用法：
 python unicast.py --top 20
 python unicast.py --top 20 --proxy http://127.0.0.1:10808
+
+项目主页: https://github.com/vitter/iptv-sources
+问题反馈: https://github.com/vitter/iptv-sources/issues
 """
 
 import os
