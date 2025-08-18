@@ -4,7 +4,7 @@
 
 ## 🚀 功能特点
 
-- **四引擎搜索**：集成FOFA、360 Quake、ZoomEye、Hunter四大搜索引擎
+- **六种搜索方式**：集成FOFA API/Cookie、360 Quake、ZoomEye API/Cookie、Hunter等搜索引擎
 - **多模式支持**：支持jsmpeg-streamer、txiptv、zhgxtv三种不同的IPTV服务器类型
 - **智能翻页**：自动翻页获取全部搜索结果，支持自定义最大翻页数限制
 - **时间过滤**：支持按时间范围搜索最新的IPTV源
@@ -12,6 +12,7 @@
 - **智能去重**：自动去除重复的IP地址和同一C段不同端口的重复数据
 - **灵活配置**：支持灵活的环境变量配置，至少配置一个搜索引擎即可使用
 - **高效率**：支持API并发请求和批量数据处理
+- **免费选项**：提供FOFA Cookie和ZoomEye Cookie免费搜索方式
 
 ## 🔍 搜索引擎支持
 
@@ -22,7 +23,8 @@
 | **FOFA API** | 100条 | API密钥 | 💰 付费 | 高效率，支持时间过滤 |
 | **FOFA Web** | 50条 | Cookie | 🆓 免费 | 推荐方式，稳定可靠 |
 | **Quake360** | 20条 | API Token | 💰 付费 | 时间过滤需付费账户 |
-| **ZoomEye** | 20条 | API密钥 | 💰 付费 | 专业网络空间搜索 |
+| **ZoomEye API** | 20条 | API密钥 | 💰 付费 | 专业网络空间搜索 |
+| **ZoomEye Web** | 50条 | Cookie | 🆓 免费 | 新增支持，免费使用 |
 | **Hunter** | 20条 | API密钥 | 💰 付费 | 鹰图平台搜索引擎 |
 
 ### 🔧 环境变量配置
@@ -45,6 +47,11 @@ QUAKE360_TOKEN=你的Quake360_Token
 # ZoomEye API（付费）
 ZOOMEYE_API_KEY=你的ZoomEye_API密钥
 
+# ZoomEye Cookie方式（免费，新增支持）
+# 注意：ZOOMEYE_COOKIE和cube-authorization必须同时配置
+ZOOMEYE_COOKIE=你的ZoomEye_Cookie
+cube-authorization=你的cube_authorization
+
 # Hunter API（付费）
 HUNTER_API_KEY=你的Hunter_API密钥
 ```
@@ -56,7 +63,16 @@ HUNTER_API_KEY=你的Hunter_API密钥
    - 按F12打开开发者工具 → Network标签
    - 刷新页面，找到请求头中的Cookie值
 
-2. **API密钥申请**：
+2. **ZoomEye Cookie获取**：
+   - 登录 [ZoomEye网站](https://www.zoomeye.org)
+   - 按F12打开开发者工具 → Network标签
+   - 进行任意搜索操作，找到API请求（如search_total或search）
+   - 在请求头中复制以下两个值：
+     * `Cookie`: 完整的Cookie字符串
+     * `cube-authorization`: 认证令牌
+   - **重要**：这两个字段必须同时配置，缺一不可，否则无法正常工作
+
+3. **API密钥申请**：
    - **FOFA API**: [FOFA API文档](https://fofa.info/api)
    - **Quake360**: [360 Quake平台](https://quake.360.net)
    - **ZoomEye**: [ZoomEye平台](https://www.zoomeye.org)
@@ -298,8 +314,28 @@ CCTV2,http://example.com/stream2.m3u8,1.234 MB/s
 
 - ✅ **至少配置一个搜索引擎**即可正常使用
 - ✅ 推荐使用FOFA Cookie方式（免费且稳定）
+- ✅ 新增ZoomEye Cookie支持（免费且高效）
 - ✅ 可以根据需要选择配置付费API
 - ✅ 程序会自动跳过未配置的搜索引擎
+- ✅ 支持API Key和Cookie优先级自动选择
+
+### 搜索引擎优先级
+
+程序采用智能优先级选择机制：
+
+1. **ZoomEye搜索优先级**：
+   - 🥇 API Key优先：如果配置了`ZOOMEYE_API_KEY`，优先使用API方式
+   - 🥈 Cookie备选：如果只配置了`ZOOMEYE_COOKIE`，使用Cookie方式
+   - 🥉 跳过：如果都未配置，跳过ZoomEye搜索
+
+2. **FOFA搜索优先级**：
+   - 🥇 API Key优先：如果配置了`FOFA_API_KEY`，优先使用API方式
+   - 🥈 Cookie备选：如果只配置了`FOFA_COOKIE`，使用Cookie方式
+   - 🥉 跳过：如果都未配置，跳过FOFA搜索
+
+3. **其他搜索引擎**：
+   - Quake360、Hunter只支持API方式
+   - 未配置API Key时自动跳过
 
 ### 时间过滤说明
 
@@ -382,12 +418,14 @@ python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output my_channels
 
 #### 主要特性
 - **四引擎并行搜索**：同时使用FOFA、360 Quake、ZoomEye、Hunter四个搜索引擎
+- **双模式支持**：每个引擎支持API和Cookie两种方式（ZoomEye和FOFA）
 - **智能翻页系统**：自动翻页获取全部搜索结果，支持最大翻页数限制
 - **智能去重**：自动去除重复的IP地址和端口
 - **地区运营商过滤**：支持按省份和运营商精确筛选
 - **时间范围控制**：支持指定搜索的时间范围
 - **多种服务器类型**：支持jsmpeg、txiptv、zhgxtv三种IPTV服务器类型
 - **灵活配置**：支持至少配置一个搜索引擎即可使用
+- **优先级选择**：API Key优先于Cookie，自动选择最佳方式
 
 #### 数据处理功能
 - **智能去重**：自动移除重复的IP地址
@@ -434,15 +472,26 @@ python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output my_channels
 
 ## 💡 最佳实践
 
-### 1. 快速开始（推荐FOFA Cookie方式）
+### 1. 快速开始（推荐免费Cookie方式）
 ```bash
-# 1. 配置FOFA Cookie（免费）
-echo 'FOFA_COOKIE=你的cookie值' > .env
+# 选项1: 配置FOFA Cookie（免费）
+echo 'FOFA_USER_AGENT=Mozilla/5.0...' > .env
+echo 'FOFA_COOKIE=你的cookie值' >> .env
 
-# 2. 快速收集jsmpeg源，限制翻页数
+# 选项2: 配置ZoomEye Cookie（免费，新增支持）
+echo 'ZOOMEYE_COOKIE=你的cookie值' > .env
+echo 'cube-authorization=你的授权值' >> .env
+
+# 选项3: 同时配置多个免费方式（推荐）
+echo 'FOFA_USER_AGENT=Mozilla/5.0...' > .env
+echo 'FOFA_COOKIE=你的fofa_cookie值' >> .env
+echo 'ZOOMEYE_COOKIE=你的zoomeye_cookie值' >> .env
+echo 'cube-authorization=你的cube_authorization值' >> .env
+
+# 快速收集jsmpeg源，限制翻页数
 python makecsv.py --jsmpeg jsmpeg_hosts.csv --max-pages 5
 
-# 3. 基于收集的源进行频道探测
+# 基于收集的源进行频道探测
 python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv
 ```
 
@@ -510,9 +559,13 @@ python all-z-j-new.py --jsmpeg jsmpeg_hosts.csv --output recent_sources
 ## 🔄 更新日志
 
 ### 最新版本特性
+- ✅ **新增ZoomEye Cookie支持**：免费使用ZoomEye搜索引擎
 - ✅ 支持自定义最大翻页数限制（--max-pages参数）
 - ✅ 优化Quake360 API调用和时间过滤功能
 - ✅ 改进配置系统，支持灵活配置（至少一个搜索引擎）
 - ✅ 增强错误处理和API速率限制管理
-- ✅ 更新页面大小配置：Quake360改为20条/页
+- ✅ 更新页面大小配置：各引擎最优化设置
 - ✅ 完善时间过滤系统，支持各引擎特有的时间参数格式
+- ✅ **智能优先级选择**：API Key优先于Cookie，自动选择最佳方式
+- ✅ **URL编码优化**：解决特殊字符搜索的兼容性问题
+- ✅ **调试信息增强**：显示搜索结果示例，便于开发调试

@@ -9,7 +9,7 @@
 ### 🔍 多源IP搜索
 - **FOFA搜索引擎**: 支持API密钥和Cookie两种认证方式，API优先，失败时自动回退到Cookie
 - **Quake360搜索引擎**: 使用Token认证的API接口（可选）
-- **ZoomEye搜索引擎**: 使用API Key认证的搜索接口（可选）
+- **ZoomEye搜索引擎**: 支持API Key和Cookie两种认证方式，API优先（可选）
 - **Hunter搜索引擎**: 使用API Key认证的搜索接口（可选）⭐**新增**
 - **智能查询构建**: 根据不同运营商（电信/联通/移动）自动构建最优搜索条件
 - **多页数据获取**: 支持翻页获取更多数据，可配置最大页数限制（默认10页）
@@ -70,8 +70,13 @@ FOFA_API_KEY=your_fofa_api_key_here
 # Quake360 Token 认证（可选）
 QUAKE360_TOKEN=your_quake360_token_here
 
-# ZoomEye API Key（可选，配置后启用ZoomEye搜索）
+# ZoomEye配置（可选）
+# 方式1: API Key认证（付费）
 ZOOMEYE_API_KEY=your_zoomeye_api_key_here
+
+# 方式2: Cookie认证（免费，两个字段必须同时配置）
+ZOOMEYE_COOKIE=your_zoomeye_cookie_here
+cube-authorization=your_cube_authorization_here
 
 # Hunter API Key（可选，配置后启用Hunter搜索）⭐**新增**
 HUNTER_API_KEY=your_hunter_api_key_here
@@ -92,8 +97,10 @@ FOFA_USER_AGENT=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KH
 - **可选配置**: `QUAKE360_TOKEN`为可选配置项，未配置时跳过Quake360搜索
 
 #### ZoomEye认证
-- **API Key方式**（唯一）: 只支持API Key认证，需要在ZoomEye官网申请API密钥
-- **可选配置**: `ZOOMEYE_API_KEY`为可选配置项，未配置时跳过ZoomEye搜索
+- **API Key方式**（付费）: 配置`ZOOMEYE_API_KEY`使用付费API接口
+- **Cookie方式**（免费）: 配置`ZOOMEYE_COOKIE`和`cube-authorization`使用免费接口
+- **配置要求**: Cookie方式需要同时配置两个字段，缺一不可
+- **可选配置**: 未配置任何ZoomEye认证时跳过ZoomEye搜索
 
 #### Hunter认证 ⭐**新增**
 - **API Key方式**（唯一）: 只支持API Key认证，需要在Hunter官网申请API密钥

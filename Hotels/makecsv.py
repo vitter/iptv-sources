@@ -40,6 +40,8 @@ FOFA_USER_AGENT - 浏览器User-Agent
 FOFA_API_KEY - FOFA API密钥（可选）
 QUAKE360_TOKEN - Quake360 API Token（可选）
 ZOOMEYE_API_KEY - ZoomEye API密钥（可选）
+ZOOMEYE_COOKIE - ZoomEye Cookie（可选，必须与cube-authorization一起使用）
+cube-authorization - ZoomEye cube-authorization头（ZOOMEYE_COOKIE必需）
 HUNTER_API_KEY - Hunter API密钥（可选）
 """
 #三个csv对应fofa上的搜索指纹分别是：
@@ -68,6 +70,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 # 尝试导入第三方库，如果失败则提示安装
 try:
@@ -118,6 +121,8 @@ class IPTVSourceCollector:
         self.fofa_user_agent = os.getenv('FOFA_USER_AGENT')
         self.fofa_api_key = os.getenv('FOFA_API_KEY', '')
         self.zoomeye_api_key = os.getenv('ZOOMEYE_API_KEY', '')  # ZoomEye API密钥
+        self.zoomeye_cookie = os.getenv('ZOOMEYE_COOKIE', '')  # ZoomEye Cookie
+        self.cube_authorization = os.getenv('cube-authorization', '')  # ZoomEye cube-authorization
         self.hunter_api_key = os.getenv('HUNTER_API_KEY', '')  # Hunter API密钥
         
         # 清理Cookie字符串
@@ -305,6 +310,10 @@ class IPTVSourceCollector:
         # 检查ZoomEye配置
         if self.zoomeye_api_key:
             available_engines.append('ZoomEye')
+        elif self.zoomeye_cookie and self.cube_authorization:
+            available_engines.append('ZoomEye')
+        elif self.zoomeye_cookie and not self.cube_authorization:
+            missing_configs.append("  4. ZoomEye Cookie: 配置了ZOOMEYE_COOKIE但缺少cube-authorization")
         
         # 检查Hunter配置
         if self.hunter_api_key:
@@ -320,7 +329,7 @@ class IPTVSourceCollector:
             print("  1. FOFA: FOFA_USER_AGENT + FOFA_COOKIE")
             print("  2. FOFA API: FOFA_API_KEY")
             print("  3. Quake360: QUAKE360_TOKEN")
-            print("  4. ZoomEye: ZOOMEYE_API_KEY")
+            print("  4. ZoomEye: ZOOMEYE_API_KEY 或 (ZOOMEYE_COOKIE + cube-authorization)")
             print("  5. Hunter: HUNTER_API_KEY")
             print("\n请在.env文件中设置这些配置项。")
             sys.exit(1)
@@ -1275,6 +1284,203 @@ class IPTVSourceCollector:
         
         return extracted_data
     
+    def search_zoomeye_cookie(self, query):
+        """从 ZoomEye 搜索数据 - Cookie方式，支持翻页获取全部数据"""
+        print("使用ZoomEye Cookie搜索")
+        
+        # 为ZoomEye查询添加时间过滤器
+        zoomeye_date_filter = self._get_zoomeye_date_filter(self.days)
+        full_query = query + zoomeye_date_filter
+        
+        print(f"ZoomEye完整查询: {full_query}")
+        
+        # 将查询转换为base64编码
+        query_b64 = base64.b64encode(full_query.encode()).decode().replace('\n', '')
+        
+        all_data = []
+        
+        # 构建请求头
+        headers = {
+            'Cookie': self.zoomeye_cookie,
+            'Content-Type': 'application/json',
+            'User-Agent': self.fofa_user_agent,
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.zoomeye.org/searchResult'
+        }
+        
+        # 如果配置了cube-authorization，添加到请求头
+        if self.cube_authorization:
+            headers['cube-authorization'] = self.cube_authorization
+        
+        try:
+            print("发送第一次请求获取总数据量...")
+            # 添加延迟避免频率限制
+            time.sleep(2)
+            
+            # 第一次请求，获取总数据量（对查询参数进行URL编码）
+            query_encoded = quote(query_b64, safe='')
+            search_total_url = f"https://www.zoomeye.org/api/search_total?q={query_encoded}&t=v4%2Bv6%2Bweb"
+            
+            response = requests.get(
+                search_total_url,
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            print(f"API响应状态码: {response.status_code}")
+            
+            # 解析JSON响应
+            response_json = response.json()
+            
+            # 获取总数据量
+            total_count = response_json.get('total', 0)
+            print(f"ZoomEye总数据量: {total_count}")
+            
+            # 计算总页数 (默认每页10条，最大50条)
+            page_size = min(50, 50)  # 使用最大每页数量以减少请求次数
+            total_pages = (total_count + page_size - 1) // page_size if total_count > 0 else 1
+            
+            # 应用最大页数限制
+            if self.max_pages:
+                actual_pages = min(total_pages, self.max_pages)
+                print(f"总页数: {total_pages}, 限制获取页数: {actual_pages}, 每页数量: {page_size}")
+            else:
+                actual_pages = total_pages
+                print(f"总页数: {total_pages}, 每页数量: {page_size}")
+            
+            # 获取搜索数据
+            for page in range(1, actual_pages + 1):
+                print(f"正在获取第 {page}/{actual_pages} 页数据...")
+                
+                # 构建搜索请求URL（对查询参数进行URL编码）
+                search_url = f"https://www.zoomeye.org/api/search?q={query_encoded}&page={page}&pageSize={page_size}&t=v4%2Bv6%2Bweb"
+                
+                # 添加延迟避免频率限制
+                if page > 1:
+                    time.sleep(2)
+                
+                try:
+                    response = requests.get(
+                        search_url,
+                        headers=headers,
+                        timeout=30
+                    )
+                    response.raise_for_status()
+                    
+                    response_json = response.json()
+                    
+                    # 提取搜索结果
+                    matches = response_json.get('matches', [])
+                    
+                    # 显示前3条原始结果示例（仅第一页）
+                    if page == 1 and matches:
+                        print(f"ZoomEye Cookie返回结果示例:")
+                        for i, match in enumerate(matches[:3]):
+                            # 简化显示格式，与FOFA保持一致
+                            ip = match.get('ip', '')
+                            portinfo = match.get('portinfo', {})
+                            port = portinfo.get('port', '') if portinfo else ''
+                            host = f"{ip}:{port}" if ip and port else ''
+                            link = f"http://{host}" if host else ''
+                            
+                            # 构建简化的5字段格式：[ip, host, port, link, org]
+                            geoinfo = match.get('geoinfo', {})
+                            org = geoinfo.get('organization', '') if isinstance(geoinfo, dict) else ''
+                            formatted_result = [ip, host, str(port), link, org]
+                            print(f"  结果 {i+1}: {formatted_result} (长度: {len(formatted_result)})")
+                            if i >= 2:  # 只显示前3个
+                                break
+                    
+                    extracted_data = self._extract_zoomeye_cookie_results(matches)
+                    all_data.extend(extracted_data)
+                    print(f"第{page}页提取到 {len(extracted_data)} 个有效结果")
+                    
+                    # 如果当前页没有数据，说明已经到了最后一页
+                    if not matches:
+                        print("当前页无数据，停止翻页")
+                        break
+                        
+                except KeyboardInterrupt:
+                    print(f"\n用户中断，已获取前 {page-1} 页数据")
+                    break
+                except Exception as e:
+                    print(f"获取第{page}页数据失败: {e}")
+                    continue
+            
+            print(f"ZoomEye Cookie总共提取到 {len(all_data)} 个结果")
+            return all_data
+            
+        except KeyboardInterrupt:
+            print(f"\n用户中断，已获取 {len(all_data)} 个结果")
+            return all_data
+        except requests.exceptions.RequestException as e:
+            print(f"ZoomEye Cookie请求失败: {e}")
+            return []
+        except Exception as e:
+            print(f"ZoomEye Cookie搜索过程中发生未知错误: {e}")
+            return []
+    
+    def _extract_zoomeye_cookie_results(self, matches_list):
+        """从ZoomEye Cookie API响应中提取结果"""
+        extracted_data = []
+        
+        for item in matches_list:
+            try:
+                # ZoomEye Cookie API字段映射
+                ip = item.get('ip', '').strip()
+                
+                # 从portinfo中获取端口信息
+                portinfo = item.get('portinfo', {})
+                port = str(portinfo.get('port', '')).strip() if portinfo else ''
+                service = portinfo.get('service', 'http') if portinfo else 'http'
+                title = portinfo.get('title', []) if portinfo else []
+                title_str = title[0] if isinstance(title, list) and title else ''
+                
+                # 地理位置信息
+                geoinfo = item.get('geoinfo', {})
+                if isinstance(geoinfo, dict):
+                    country = geoinfo.get('country', {}).get('names', {}).get('cn', 'CN')
+                    city = geoinfo.get('city', {}).get('names', {}).get('cn', '')
+                    organization = geoinfo.get('organization', '')
+                    subdivisions = geoinfo.get('subdivisions', {}).get('names', {}).get('cn', '')
+                else:
+                    country = 'CN'
+                    city = ''
+                    organization = ''
+                    subdivisions = ''
+                
+                if ip and port:
+                    # 确保IP是有效的IP地址格式
+                    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', str(ip)):
+                        host = f"{ip}:{port}"
+                        
+                        # 根据service确定协议和链接
+                        protocol_prefix = 'https' if service in ['https', 'ssl'] else 'http'
+                        link = f"{protocol_prefix}://{host}"
+                        
+                        # 构建组织信息
+                        org_info = organization if organization else subdivisions
+                        
+                        extracted_data.append({
+                            'host': host,
+                            'ip': ip,
+                            'port': port,
+                            'link': link,
+                            'protocol': service if service in ['http', 'https'] else 'http',
+                            'title': title_str[:100],  # 限制标题长度
+                            'domain': '',  # Cookie API可能不提供domain信息
+                            'country': country,
+                            'city': city,
+                            'org': org_info,
+                            '_source': 'zoomeye'
+                        })
+            except Exception as e:
+                print(f"处理ZoomEye Cookie结果项时出错: {e}")
+                continue
+        
+        return extracted_data
+    
     def search_hunter_api(self, query):
         """从 Hunter 搜索数据 - API方式，支持翻页获取全部数据"""
         if not self.hunter_api_key:
@@ -1531,11 +1737,20 @@ class IPTVSourceCollector:
             print("❌ 未配置QUAKE360_TOKEN，跳过Quake360搜索")
         
         # 3. ZoomEye搜索（可选）
-        if self.zoomeye_api_key:
+        if self.zoomeye_api_key and self.zoomeye_cookie and self.cube_authorization:
+            print("🔑 配置了ZoomEye API Key和Cookie，优先使用API Key方式搜索")
             zoomeye_data = self.search_zoomeye_api(query_zoomeye)
             all_data.extend(zoomeye_data)
+        elif self.zoomeye_api_key:
+            zoomeye_data = self.search_zoomeye_api(query_zoomeye)
+            all_data.extend(zoomeye_data)
+        elif self.zoomeye_cookie and self.cube_authorization:
+            zoomeye_data = self.search_zoomeye_cookie(query_zoomeye)
+            all_data.extend(zoomeye_data)
+        elif self.zoomeye_cookie and not self.cube_authorization:
+            print("❌ 配置了ZOOMEYE_COOKIE但缺少cube-authorization，跳过ZoomEye搜索")
         else:
-            print("❌ 未配置ZOOMEYE_API_KEY，跳过ZoomEye搜索")
+            print("❌ 未配置ZOOMEYE_API_KEY或(ZOOMEYE_COOKIE + cube-authorization)，跳过ZoomEye搜索")
         
         # 4. Hunter搜索（可选）
         if self.hunter_api_key:

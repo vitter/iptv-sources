@@ -179,6 +179,8 @@ FOFA_COOKIE=your_cookie          # 推荐，免费
 FOFA_API_KEY=your_api_key        # 可选，付费
 QUAKE360_TOKEN=your_token        # 可选，付费
 ZOOMEYE_API_KEY=your_key         # 可选，付费
+ZOOMEYE_COOKIE=your_cookie       # 可选，免费（需要配合cube-authorization）
+cube-authorization=your_auth     # 可选，免费（ZOOMEYE_COOKIE必需）
 HUNTER_API_KEY=your_key          # 可选，付费，⭐新增
 FOFA_USER_AGENT=Mozilla/5.0...   # 配合Cookie使用
 ```
