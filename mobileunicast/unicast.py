@@ -30,6 +30,56 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def load_env_file(env_path=".env"):
+    """加载环境变量文件，支持多行值"""
+    if os.path.exists(env_path):
+        with open(env_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 使用正则表达式解析环境变量，支持多行值
+        pattern = r'^([A-Z_][A-Z0-9_]*)=(.*)$'
+        lines = content.split('\n')
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line and not line.startswith('#') and '=' in line:
+                match = re.match(pattern, line)
+                if match:
+                    key = match.group(1)
+                    value = match.group(2)
+                    
+                    # 处理引号包围的多行值
+                    if value.startswith('"') and not value.endswith('"'):
+                        # 多行值，继续读取直到找到结束引号
+                        i += 1
+                        while i < len(lines):
+                            next_line = lines[i]
+                            value += '\n' + next_line
+                            if next_line.rstrip().endswith('"'):
+                                break
+                            i += 1
+                    
+                    # 移除首尾引号
+                    value = value.strip().strip('"').strip("'")
+                    os.environ[key] = value
+            i += 1
+
+
+def load_urls_from_env():
+    """从环境变量加载URL列表防止有人拿走代码不注明出处不感谢就直接使用"""
+    urls_env = os.getenv('IPTV_URLS', '')
+    if urls_env:
+        # 支持多种分隔符：换行符、逗号、分号
+        urls = []
+        for url in re.split(r'[,;\n]+', urls_env):
+            url = url.strip()
+            if url:
+                urls.append(url)
+        return urls
+    return None
+
+
 @dataclass
 class ChannelInfo:
     """频道信息"""
@@ -51,45 +101,10 @@ class ChannelGroup:
 class UnicastProcessor:
     """IPTV直播源处理器"""
     
-    # URL列表
-    URLS = [
+    # 默认URL列表（作为备用）
+    DEFAULT_URLS = [
         "https://live.zbds.org/tv/yd.txt",
-        "https://chinaiptv.pages.dev/Unicast/anhui/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/fujian/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/guangxi/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/hebei/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/heilongjiang/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/henan/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/hubei/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/jiangxi/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/jiangsu/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/shan3xi/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/shandong/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/zhejiang/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/shanghai/mobile.txt",
-        "https://chinaiptv.pages.dev/Unicast/liaoning/mobile.txt",
-        "https://mycode.zhoujie218.top/me/jsyd.txt",
-        "https://raw.githubusercontent.com/q1017673817/iptv_zubo/refs/heads/main/hnyd.txt",
-        "https://raw.githubusercontent.com/suxuang/myIPTV/refs/heads/main/%E7%A7%BB%E5%8A%A8%E4%B8%93%E4%BA%AB.txt",
-        "https://live.zbds.org/tv/iptv6.txt",
-        "https://live.zbds.org/tv/zjyd.txt",
-        "https://live.zbds.org/tv/zjyd1.txt",
-        "https://live.zbds.org/tv/jxyd.txt",
-        "https://live.zbds.org/tv/sxyd.txt",
-        "https://vdyun.com/hbm3u.txt",
-        "https://vdyun.com/hbcm.txt",
-        "https://vdyun.com/hbcm1.txt",
-        "https://vdyun.com/hbcm2.txt",
-        "https://vdyun.com/yd.txt",
-        "https://vdyun.com/yd1.txt",
-        "https://vdyun.com/yd2.txt",
-        "https://vdyun.com/yd3.txt",
-        "https://vdyun.com/ipv6.txt",
-        "https://vdyun.com/sjzcm1.txt",
-        "https://vdyun.com/sjzcm2.txt",
-        "https://vdyun.com/hljcm.txt",
-        "https://vdyun.com/shxcm.txt",
-        "https://vdyun.com/shxcm1.txt"
+        "https://chinaiptv.pages.dev/Unicast/anhui/mobile.txt"
     ]
     
     # 分组关键字
@@ -138,6 +153,19 @@ class UnicastProcessor:
         self.output_dir = Path("output")
         self.temp_file = Path("txt.tmp")  # 汇总临时文件
         self.speed_log = Path("speed.log")  # 测速日志文件
+        
+        # 加载环境变量文件
+        load_env_file()
+        
+        # 从环境变量或使用默认URL列表
+        env_urls = load_urls_from_env()
+        if env_urls:
+            self.URLS = env_urls
+            print(f"✓ 从环境变量加载了 {len(env_urls)} 个URL")
+        else:
+            self.URLS = self.DEFAULT_URLS
+            print(f"! 未找到环境变量IPTV_URLS，使用默认的 {len(self.DEFAULT_URLS)} 个URL")
+            
         self._create_directories()
         
     def _create_directories(self):
@@ -165,7 +193,8 @@ class UnicastProcessor:
                         'https': self.proxy
                     }
                 
-                response = requests.get(url, timeout=30, proxies=proxies, headers={
+                print(f"⏳ 正在下载: {url}")
+                response = requests.get(url, timeout=15, proxies=proxies, headers={
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 })
                 response.raise_for_status()
@@ -176,20 +205,30 @@ class UnicastProcessor:
                 print(f"✓ 下载成功: {filename}")
                 return filepath
                 
+            except requests.exceptions.Timeout:
+                print(f"✗ 下载超时: {url}")
+                return None
+            except requests.exceptions.ConnectionError:
+                print(f"✗ 连接失败: {url}")
+                return None
+            except requests.exceptions.HTTPError as e:
+                print(f"✗ HTTP错误 {e.response.status_code}: {url}")
+                return None
             except Exception as e:
                 print(f"✗ 下载失败 {url}: {e}")
                 return None
         
-        # 并发下载
+        # 减少并发数量，避免网络拥堵
         downloaded_files = []
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = [executor.submit(download_single_file, url) for url in self.URLS]
             for future in as_completed(futures):
                 result = future.result()
                 if result:
                     downloaded_files.append(result)
         
-        print(f"下载完成，共获得 {len(downloaded_files)} 个文件")
+        print(f"下载完成，共获得 {len(downloaded_files)} 个文件，失败 {len(self.URLS) - len(downloaded_files)} 个")
+        return downloaded_files
         return downloaded_files
     
     def _generate_unique_filename(self, url):

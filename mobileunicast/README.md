@@ -27,6 +27,44 @@
 pip install requests
 ```
 
+## ⚙️ 配置文件
+
+为了保护直播源URL不被爬虫获取，本工具支持通过环境变量配置文件来管理URL列表。
+
+### 配置步骤
+
+1. **复制示例配置文件**:
+```bash
+cp .env.example .env
+```
+
+2. **编辑配置文件**:
+打开 `.env` 文件，修改 `IPTV_URLS` 变量：
+
+```bash
+# 方式1：使用逗号分隔
+IPTV_URLS="https://example1.com/tv1.txt,https://example2.com/tv2.txt,https://example3.com/tv3.txt"
+
+# 方式2：使用换行符分隔（推荐）
+IPTV_URLS="
+https://example1.com/tv1.txt
+https://example2.com/tv2.txt
+https://example3.com/tv3.txt
+"
+
+# 方式3：使用分号分隔
+IPTV_URLS="https://example1.com/tv1.txt;https://example2.com/tv2.txt;https://example3.com/tv3.txt"
+```
+
+3. **运行程序**:
+程序启动时会自动加载 `.env` 文件中的URL配置。如果未配置或配置为空，将使用内置的默认URL列表。
+
+### 配置说明
+- 如果存在 `.env` 文件且配置了 `IPTV_URLS`，程序将使用配置文件中的URL
+- 如果未配置或配置为空，程序将使用内置的默认URL列表
+- 支持多种URL分隔符：换行符、逗号、分号
+- URL两边的空白字符会被自动清理
+
 ## 🎯 使用方法
 
 ### 基本用法
