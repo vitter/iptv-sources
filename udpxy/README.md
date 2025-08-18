@@ -841,6 +841,11 @@ iptv-speedtest/
     ├── Telecom/
     ├── Unicom/
     └── Mobile/
+
+另：
+udpxysourcemaker 其他udpxy服务遍历尝试各个运营商组播测试生成播放列表
+downloadtemp 配套的下载各个运营商组播地址的工具
+
 ```
 
 ## 更新日志
