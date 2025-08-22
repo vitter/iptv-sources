@@ -198,8 +198,10 @@ async function extractPortsFromSearch() {
         
         const response = await sendMessageWithRetry({ action: 'extractPorts' }, 3);
         
-        if (response && response.success && response.portsData) {
-            const portsData = response.portsData;
+        console.log('🔍 端口提取响应:', response);
+        
+        if (response && response.success) {
+            const portsData = response.portsData || response.data || [];
             
             if (portsData.length > 0) {
                 // 生成CSV内容
@@ -218,12 +220,102 @@ async function extractPortsFromSearch() {
                 showStatus('❌ 未找到端口数据', 'error');
             }
         } else {
-            showStatus('❌ 未找到端口数据', 'error');
+            // 显示诊断信息
+            let message = '❌ 未找到端口数据';
+            
+            if (response && response.diagnostic) {
+                const diag = response.diagnostic;
+                console.log('📊 诊断信息:', diag);
+                
+                message += `\n\n📍 当前页面: ${diag.url}`;
+                message += `\n🏷️ 页面类型: ${diag.pageType}`;
+                message += `\n📄 Scripts: ${diag.scripts}`;
+                message += `\n🔗 Data元素: ${diag.dataElements}`;
+                message += `\n🎯 有结果元素: ${diag.hasResults ? '是' : '否'}`;
+                
+                if (diag.availableAPIs && diag.availableAPIs.length > 0) {
+                    message += `\n🌐 发现的API端点: ${diag.availableAPIs.slice(0, 5).join(', ')}`;
+                }
+                
+                if (diag.networkRequests && diag.networkRequests.length > 0) {
+                    message += `\n📡 网络请求: ${diag.networkRequests.length} 个`;
+                    diag.networkRequests.slice(0, 3).forEach(req => {
+                        message += `\n  - ${req.url}`;
+                    });
+                }
+                
+                // 创建详细诊断窗口
+                showDiagnosticInfo(diag);
+            }
+            
+            showStatus(message, 'error');
         }
     } catch (error) {
         console.error('提取端口数据失败:', error);
-        showStatus('❌ 提取端口数据失败', 'error');
+        showStatus('❌ 提取端口数据失败: ' + error.message, 'error');
     }
+}
+
+// 显示诊断信息窗口
+function showDiagnosticInfo(diagnostic) {
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.8); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    `;
+    
+    const content = document.createElement('div');
+    content.style.cssText = `
+        background: white; padding: 20px; border-radius: 8px;
+        max-width: 700px; max-height: 80vh; overflow-y: auto;
+        font-family: monospace; font-size: 12px;
+    `;
+    
+    content.innerHTML = `
+        <h3>🔍 页面诊断信息</h3>
+        <p><strong>URL:</strong> ${diagnostic.url}</p>
+        <p><strong>页面类型:</strong> ${diagnostic.pageType}</p>
+        <p><strong>Script标签数量:</strong> ${diagnostic.scripts}</p>
+        <p><strong>Data属性元素:</strong> ${diagnostic.dataElements}</p>
+        <p><strong>有结果元素:</strong> ${diagnostic.hasResults ? '是' : '否'}</p>
+        
+        ${diagnostic.censysAPIUrl ? `
+        <h4>🎯 使用的Censys API地址:</h4>
+        <div style="background: #f5f5f5; padding: 10px; border-radius: 4px; word-break: break-all; margin: 10px 0;">
+            ${diagnostic.censysAPIUrl}
+        </div>
+        <button onclick="navigator.clipboard.writeText('${diagnostic.censysAPIUrl}'); alert('API地址已复制到剪贴板');" 
+                style="padding: 5px 10px; margin-top: 5px;">📋 复制API地址</button>
+        ` : ''}
+        
+        ${diagnostic.availableAPIs.length > 0 ? `
+        <h4>🌐 发现的API端点:</h4>
+        <ul>${diagnostic.availableAPIs.map(api => `<li>${api}</li>`).join('')}</ul>
+        ` : ''}
+        
+        ${diagnostic.networkRequests.length > 0 ? `
+        <h4>📡 网络请求 (最近${diagnostic.networkRequests.length}个):</h4>
+        <ul>${diagnostic.networkRequests.map(req => `<li>${req.url} (${req.type})</li>`).join('')}</ul>
+        ` : ''}
+        
+        <div style="margin-top: 15px;">
+            <button onclick="this.parentElement.parentElement.parentElement.remove()" 
+                    style="padding: 8px 16px; margin-right: 10px;">关闭</button>
+            <button onclick="console.log('诊断信息:', ${JSON.stringify(diagnostic).replace(/"/g, '\\"')}); alert('详细信息已输出到控制台');" 
+                    style="padding: 8px 16px;">输出到控制台</button>
+        </div>
+    `;
+    
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    
+    // 30秒后自动关闭
+    setTimeout(() => {
+        if (modal.parentNode) {
+            modal.remove();
+        }
+    }, 30000);
 }
 
 // 主机详情功能 - 收集主机数据
@@ -370,12 +462,20 @@ function downloadHostCSV() {
 
 // 清空主机缓存
 function clearHostCache() {
-    if (confirm('确认要清空所有收集的主机数据吗？')) {
+    if (confirm('确认要清空所有收集的数据吗？\n\n这将清除：\n- 主机详情缓存\n- IP列表缓存\n- 搜索结果缓存')) {
+        // 清空所有缓存数据
         hostCache = [];
+        ipList = [];
+        
+        // 同时清除存储中的搜索缓存
+        chrome.storage.local.remove(['searchCache'], () => {
+            console.log('✅ 搜索缓存已清除');
+        });
+        
         saveDataToStorage();
         updateStats();
         updateButtonStates();
-        showStatus('✅ 已清空主机缓存', 'success');
+        showStatus('✅ 已清空所有缓存数据', 'success');
     }
 }
 
@@ -438,7 +538,7 @@ function viewDetailedStats() {
         html += `
             <div class="section">
                 <h2>🖥️ 主机详情列表</h2>
-                <button class="export-btn" onclick="exportTableToCSV()">💾 导出CSV</button>
+                <button class="export-btn" id="exportCsvBtn">💾 导出CSV</button>
                 <table id="hostTable">
                     <thead>
                         <tr>
@@ -479,7 +579,7 @@ function viewDetailedStats() {
         html += `
             <div class="section">
                 <h2>📋 IP列表</h2>
-                <button class="export-btn" onclick="exportIPList()">💾 导出TXT</button>
+                <button class="export-btn" id="exportIpBtn">💾 导出TXT</button>
                 <div style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f8f9fa; font-family: monospace;">
                     ${ipList.map(ip => `<div>${ip}</div>`).join('')}
                 </div>
@@ -498,63 +598,31 @@ function viewDetailedStats() {
                 </ul>
             </div>
         </div>
-        
-        <script>
-            function exportTableToCSV() {
-                const headers = ['ip', 'port', 'url', 'dns', 'country', 'city', 'province', 'isp'];
-                const hostData = ${JSON.stringify(hostCache)};
-                
-                let csvContent = headers.join(',') + '\n';
-                
-                hostData.forEach(host => {
-                    if (host.ports && host.ports.length > 0) {
-                        host.ports.forEach(port => {
-                            const row = [
-                                host.ip || '',
-                                port || '',
-                                'http://' + host.ip + ':' + port || '',
-                                host.dns || '',
-                                host.country || '',
-                                host.city || '',
-                                host.province || '',
-                                host.isp || ''
-                            ];
-                            csvContent += row.map(field => '"' + String(field).replace(/"/g, '""') + '"').join(',') + '\n';
-                        });
-                    } else {
-                        const row = [
-                            host.ip || '', '', '', host.dns || '', host.country || '', 
-                            host.city || '', host.province || '', host.isp || ''
-                        ];
-                        csvContent += row.map(field => '"' + String(field).replace(/"/g, '""') + '"').join(',') + '\n';
-                    }
-                });
-                
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const link = document.createElement('a');
-                const url = URL.createObjectURL(blob);
-                link.setAttribute('href', url);
-                link.setAttribute('download', 'censys_data_' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv');
-                link.click();
-            }
-            
-            function exportIPList() {
-                const ipData = ${JSON.stringify(ipList)};
-                const content = ipData.join('\n');
-                const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
-                const link = document.createElement('a');
-                const url = URL.createObjectURL(blob);
-                link.setAttribute('href', url);
-                link.setAttribute('download', 'censys_ips_' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt');
-                link.click();
-            }
-        </script>
     </body>
     </html>
     `;
     
     statsWindow.document.write(html);
     statsWindow.document.close();
+    
+    // 为按钮添加事件监听器
+    if (hostCache.length > 0) {
+        const csvBtn = statsWindow.document.getElementById('exportCsvBtn');
+        if (csvBtn) {
+            csvBtn.addEventListener('click', () => {
+                exportTableToCSV(statsWindow);
+            });
+        }
+    }
+    
+    if (ipList.length > 0) {
+        const ipBtn = statsWindow.document.getElementById('exportIpBtn');
+        if (ipBtn) {
+            ipBtn.addEventListener('click', () => {
+                exportIPList(statsWindow);
+            });
+        }
+    }
 }
 
 // 通用下载函数
@@ -672,4 +740,65 @@ function showStatus(message, type = 'info') {
         statusDiv.textContent = '';
         statusDiv.className = 'status';
     }, 3000);
+}
+
+// 导出CSV数据（用于统计窗口）
+function exportTableToCSV(targetWindow) {
+    const headers = ['ip', 'port', 'url', 'dns', 'country', 'city', 'province', 'isp'];
+    
+    let csvContent = headers.join(',') + '\n';
+    
+    hostCache.forEach(host => {
+        if (host.ports && host.ports.length > 0) {
+            host.ports.forEach(port => {
+                const row = [
+                    host.ip || '',
+                    port || '',
+                    'http://' + host.ip + ':' + port || '',
+                    host.dns || '',
+                    host.country || '',
+                    host.city || '',
+                    host.province || '',
+                    host.isp || ''
+                ];
+                csvContent += row.map(field => '"' + String(field).replace(/"/g, '""') + '"').join(',') + '\n';
+            });
+        } else {
+            const row = [
+                host.ip || '', '', '', host.dns || '', host.country || '', 
+                host.city || '', host.province || '', host.isp || ''
+            ];
+            csvContent += row.map(field => '"' + String(field).replace(/"/g, '""') + '"').join(',') + '\n';
+        }
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    // 在目标窗口中创建下载链接
+    const link = targetWindow.document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'censys_data_' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv');
+    link.style.display = 'none';
+    targetWindow.document.body.appendChild(link);
+    link.click();
+    targetWindow.document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
+// 导出IP列表（用于统计窗口）
+function exportIPList(targetWindow) {
+    const content = ipList.join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    // 在目标窗口中创建下载链接
+    const link = targetWindow.document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'censys_ips_' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt');
+    link.style.display = 'none';
+    targetWindow.document.body.appendChild(link);
+    link.click();
+    targetWindow.document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
