@@ -1,0 +1,76 @@
+{
+  "version": "2.0.0",
+  "name": "Censys UDPXY 提取器",
+  "description": "增强版Censys数据提取插件，专为中国UDPXY服务器搜索优化",
+  "build_date": "2024-01-15",
+  "features": {
+    "data_extraction": {
+      "fields_count": 23,
+      "json_parsers": ["next_js", "initial_state", "data_attributes", "pattern_matching"],
+      "text_processing": ["nested_traversal", "fallback_patterns", "enhanced_selectors"]
+    },
+    "localization": {
+      "language": "zh-CN",
+      "ui_elements": "完全中文化",
+      "error_messages": "中文错误提示",
+      "status_updates": "实时中文状态"
+    },
+    "reliability": {
+      "connection_management": "ping检测 + 自动注入",
+      "retry_mechanism": "3次重试，指数退避",
+      "error_handling": "全面错误处理"
+    },
+    "performance": {
+      "async_processing": true,
+      "memory_optimized": true,
+      "large_dataset_support": true
+    }
+  },
+  "target_queries": [
+    "(host.services.software.product = \"udpxy\" or web.software.product = \"udpxy\") and host.location.country = \"China\"",
+    "host.services.software.product = \"udpxy\" and host.location.province = \"Beijing\"",
+    "host.services.software.product = \"udpxy\" and host.services.port = 4022"
+  ],
+  "csv_fields": [
+    "IP", "Port", "Country", "City", "Province", "Organization", "ISP", "ASN",
+    "Service_Name", "Software_Product", "Software_Version", "HTTP_Title", "Banner",
+    "Status", "Config_Info", "TLS_Version", "TLS_Cipher", "Latitude", "Longitude",
+    "Network", "BGP_Prefix", "Last_Seen", "Extraction_Time", "Source"
+  ],
+  "browser_compatibility": {
+    "chrome": ">=88",
+    "edge": ">=88", 
+    "firefox": ">=85"
+  },
+  "manifest_version": 3,
+  "permissions": [
+    "activeTab",
+    "storage", 
+    "downloads",
+    "scripting"
+  ],
+  "changelog": {
+    "2.0.0": [
+      "完全中文界面重设计",
+      "增强JSON数据解析能力",
+      "23字段CSV导出功能",
+      "智能连接管理系统",
+      "多重重试机制",
+      "高级错误处理",
+      "性能优化改进"
+    ],
+    "1.0.0": [
+      "基础数据提取功能",
+      "简单CSV导出",
+      "基本连接管理"
+    ]
+  },
+  "development_stats": {
+    "total_lines": 1581,
+    "content_script_lines": 1047,
+    "popup_script_lines": 342,
+    "html_lines": 192,
+    "chinese_strings": 13,
+    "json_extraction_methods": 4
+  }
+}

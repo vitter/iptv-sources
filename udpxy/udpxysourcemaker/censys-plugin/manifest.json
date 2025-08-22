@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Censys UDPXY 提取器",
+  "version": "1.0",
+  "description": "从Censys搜索结果中提取UDPXY服务器",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "downloads",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://platform.censys.io/*",
+    "https://search.censys.io/*",
+    "https://censys.io/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://platform.censys.io/*",
+        "https://search.censys.io/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Censys UDPXY 提取器"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
