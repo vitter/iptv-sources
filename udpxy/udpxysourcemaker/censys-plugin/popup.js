@@ -25,6 +25,7 @@ function setupEventHandlers() {
     
     // 搜索页面模式按钮
     document.getElementById('extractIPsBtn').addEventListener('click', extractIPsFromSearch);
+    document.getElementById('extractPortsBtn').addEventListener('click', extractPortsFromSearch);
     document.getElementById('downloadIPsBtn').addEventListener('click', downloadIPList);
     
     // 主机详情模式按钮
@@ -177,6 +178,51 @@ async function extractIPsFromSearch() {
     } catch (error) {
         console.error('提取IP失败:', error);
         showStatus('❌ 提取IP失败', 'error');
+    }
+}
+
+// 搜索页面功能 - 提取端口数据
+async function extractPortsFromSearch() {
+    if (!connected) {
+        showStatus('❌ 请先连接到页面', 'error');
+        return;
+    }
+    
+    if (currentMode !== 'search') {
+        showStatus('❌ 此功能仅在搜索页面可用', 'error');
+        return;
+    }
+    
+    try {
+        showStatus('🔌 正在提取端口数据...', 'info');
+        
+        const response = await sendMessageWithRetry({ action: 'extractPorts' }, 3);
+        
+        if (response && response.success && response.portsData) {
+            const portsData = response.portsData;
+            
+            if (portsData.length > 0) {
+                // 生成CSV内容
+                let csvContent = 'ip,ports\n';
+                portsData.forEach(item => {
+                    csvContent += `"${item.ip}","${item.ports.join('|')}"\n`;
+                });
+                
+                // 下载CSV文件
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const filename = `censys_ports_${timestamp}.csv`;
+                downloadFile(csvContent, filename, 'text/csv');
+                
+                showStatus(`✅ 成功提取 ${portsData.length} 个主机的端口数据，已下载到 ${filename}`, 'success');
+            } else {
+                showStatus('❌ 未找到端口数据', 'error');
+            }
+        } else {
+            showStatus('❌ 未找到端口数据', 'error');
+        }
+    } catch (error) {
+        console.error('提取端口数据失败:', error);
+        showStatus('❌ 提取端口数据失败', 'error');
     }
 }
 

@@ -208,7 +208,31 @@ function createSearchPageUI() {
     extractButton.title = '从搜索结果提取IP列表';
     extractButton.onclick = extractIPsFromPage;
     
+    // 创建提取端口按钮
+    const extractPortsButton = document.createElement('div');
+    extractPortsButton.style.cssText = `
+        position: fixed;
+        top: 70px;
+        right: 20px;
+        z-index: 10000;
+        background: linear-gradient(45deg, #fd7e14, #e83e8c);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 10px 15px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        transition: all 0.3s ease;
+        user-select: none;
+    `;
+    extractPortsButton.textContent = '🔌 提取端口数据';
+    extractPortsButton.title = '从搜索结果提取IP和HTTP/HTTPS端口';
+    extractPortsButton.onclick = extractPortsFromPage;
+    
     container.appendChild(extractButton);
+    container.appendChild(extractPortsButton);
     document.body.appendChild(container);
     floatingButton = container;
 }
@@ -422,6 +446,52 @@ async function extractIPsFromPage() {
     }
 }
 
+// 从页面提取端口数据
+async function extractPortsFromPage() {
+    try {
+        // 检查扩展上下文是否有效
+        if (!chrome.storage) {
+            showPageNotification('扩展上下文无效，请刷新页面', 'error');
+            return;
+        }
+        
+        showPageNotification('正在提取端口数据...', 'info');
+        
+        const portsData = await extractPortsFromSearchPage();
+        
+        if (portsData && portsData.length > 0) {
+            // 生成CSV内容
+            let csvContent = 'ip,ports\n';
+            portsData.forEach(item => {
+                csvContent += `"${item.ip}","${item.ports.join('|')}"\n`;
+            });
+            
+            // 创建下载链接
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `censys_ports_${timestamp}.csv`;
+            
+            // 创建临时链接进行下载
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            showPageNotification(`✅ 已导出 ${portsData.length} 个主机的端口数据到 ${filename}`, 'success');
+        } else {
+            showPageNotification('❌ 未找到端口数据', 'error');
+        }
+        
+    } catch (error) {
+        console.error('提取端口数据失败:', error);
+        showPageNotification('❌ 提取端口数据失败: ' + error.message, 'error');
+    }
+}
+
 // 显示页面通知
 function showPageNotification(message, type = 'info') {
     // 移除已存在的通知
@@ -517,6 +587,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'extractIPs':
             extractIPsFromSearchPage()
                 .then(ips => sendResponse({ success: true, ips: ips }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true; // 保持消息通道开放
+            
+        case 'extractPorts':
+            extractPortsFromSearchPage()
+                .then(portsData => sendResponse({ success: true, portsData: portsData }))
                 .catch(error => sendResponse({ success: false, error: error.message }));
             return true; // 保持消息通道开放
             
@@ -739,6 +815,26 @@ async function extractIPsFromSearchPage() {
     }
 }
 
+// 从搜索页面提取端口数据
+async function extractPortsFromSearchPage() {
+    console.log('🔌 开始从搜索页面提取端口数据...');
+    
+    const portsData = [];
+    
+    try {
+        // 从JSON数据中提取IP和端口信息
+        await extractPortsFromJSON(portsData);
+        
+        console.log(`✅ 总共提取到 ${portsData.length} 个主机的端口数据`);
+        
+        return portsData;
+        
+    } catch (error) {
+        console.error('❌ 提取端口数据时出错:', error);
+        throw error;
+    }
+}
+
 // 从JSON数据中提取IP
 async function extractIPsFromJSON(ipsSet) {
     try {
@@ -791,6 +887,58 @@ async function extractIPsFromJSON(ipsSet) {
     }
 }
 
+// 从JSON数据中提取端口信息
+async function extractPortsFromJSON(portsDataArray) {
+    try {
+        // 查找页面中的JSON数据
+        const scripts = document.querySelectorAll('script');
+        
+        for (const script of scripts) {
+            const content = script.textContent || script.innerHTML;
+            
+            // 查找不同格式的JSON数据
+            const jsonPatterns = [
+                /window\.__INITIAL_STATE__\s*=\s*({.*?});/s,
+                /window\.__NUXT__\s*=\s*({.*?});/s,
+                /"results":\s*(\[.*?\])/s,
+                /"hosts":\s*(\[.*?\])/s
+            ];
+            
+            for (const pattern of jsonPatterns) {
+                const match = content.match(pattern);
+                if (match) {
+                    try {
+                        const data = JSON.parse(match[1]);
+                        extractPortsFromObject(data, portsDataArray);
+                    } catch (parseError) {
+                        console.warn('JSON解析失败:', parseError);
+                    }
+                }
+            }
+        }
+        
+        // 查找data属性中的JSON
+        const dataElements = document.querySelectorAll('[data-props], [data-page]');
+        dataElements.forEach(element => {
+            ['data-props', 'data-page'].forEach(attr => {
+                const dataAttr = element.getAttribute(attr);
+                if (dataAttr) {
+                    try {
+                        const decodedData = dataAttr.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                        const data = JSON.parse(decodedData);
+                        extractPortsFromObject(data, portsDataArray);
+                    } catch (parseError) {
+                        console.warn('Data属性JSON解析失败:', parseError);
+                    }
+                }
+            });
+        });
+        
+    } catch (error) {
+        console.warn('从JSON提取端口信息时出错:', error);
+    }
+}
+
 // 递归提取对象中的IP
 function extractIPsFromObject(obj, ipsSet) {
     if (!obj || typeof obj !== 'object') return;
@@ -814,6 +962,56 @@ function extractIPsFromObject(obj, ipsSet) {
             }
         } else if (typeof value === 'object') {
             extractIPsFromObject(value, ipsSet);
+        }
+    });
+}
+
+// 递归提取对象中的端口信息
+function extractPortsFromObject(obj, portsDataArray) {
+    if (!obj || typeof obj !== 'object') return;
+    
+    // 如果是数组，遍历每个元素
+    if (Array.isArray(obj)) {
+        obj.forEach(item => extractPortsFromObject(item, portsDataArray));
+        return;
+    }
+    
+    // 查找主机对象结构
+    if (obj.host && obj.host.ip && obj.host.services) {
+        const ip = obj.host.ip;
+        const services = obj.host.services;
+        
+        if (isValidIP(ip) && Array.isArray(services)) {
+            const httpPorts = [];
+            
+            services.forEach(service => {
+                if (service.port && (service.protocol === 'HTTP' || service.protocol === 'HTTPS')) {
+                    httpPorts.push(service.port);
+                    console.log(`从JSON提取 ${ip} 的 ${service.protocol} 端口: ${service.port}`);
+                }
+            });
+            
+            if (httpPorts.length > 0) {
+                // 检查是否已存在该IP的数据
+                const existingEntry = portsDataArray.find(entry => entry.ip === ip);
+                if (existingEntry) {
+                    // 合并端口，去重
+                    existingEntry.ports = [...new Set([...existingEntry.ports, ...httpPorts])];
+                } else {
+                    portsDataArray.push({
+                        ip: ip,
+                        ports: [...new Set(httpPorts)]
+                    });
+                }
+            }
+        }
+    }
+    
+    // 递归搜索其他对象
+    Object.keys(obj).forEach(key => {
+        const value = obj[key];
+        if (typeof value === 'object') {
+            extractPortsFromObject(value, portsDataArray);
         }
     });
 }
