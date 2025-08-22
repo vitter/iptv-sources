@@ -120,7 +120,7 @@ def extract_json_data(html_content):
             for match in matches:
                 try:
                     port = int(match)
-                    if 1000 <= port <= 65535:  # 有效端口范围
+                    if 1 <= port <= 65535:  # 有效端口范围
                         ports.append(port)
                 except ValueError:
                     continue
@@ -318,7 +318,7 @@ def extract_udpxy_info(html_content, ip):
                 matches = re.findall(pattern, html_content, re.IGNORECASE)
                 for match in matches:
                     port = int(match)
-                    if 1000 <= port <= 65535 and port not in udpxy_info['ports']:
+                    if 1 <= port <= 65535 and port not in udpxy_info['ports']:
                         udpxy_info['ports'].append(port)
                         udpxy_info['urls'].append(f"http://{ip}:{port}")
         
