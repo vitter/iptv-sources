@@ -33,6 +33,7 @@ function setupEventHandlers() {
     document.getElementById('downloadCSVBtn').addEventListener('click', downloadHostCSV);
     document.getElementById('clearCacheBtn').addEventListener('click', clearHostCache);
     document.getElementById('viewStatsBtn').addEventListener('click', viewDetailedStats);
+    document.getElementById('batchFetchBtn').addEventListener('click', toggleBatchFetch);
 }
 
 async function detectPageType() {
@@ -476,6 +477,29 @@ function clearHostCache() {
         updateStats();
         updateButtonStates();
         showStatus('✅ 已清空所有缓存数据', 'success');
+    }
+}
+
+// 批量获取IP详情功能
+async function toggleBatchFetch() {
+    if (!connected) {
+        showStatus('❌ 请先连接到页面', 'error');
+        return;
+    }
+    
+    try {
+        showStatus('🔄 正在启动批量获取...', 'info');
+        
+        const response = await sendMessageWithRetry({ action: 'toggleBatchFetch' }, 3);
+        
+        if (response && response.success) {
+            showStatus(response.message || '✅ 批量获取操作成功', 'success');
+        } else {
+            showStatus(response.message || '❌ 批量获取操作失败', 'error');
+        }
+    } catch (error) {
+        console.error('批量获取操作失败:', error);
+        showStatus('❌ 批量获取操作失败: ' + error.message, 'error');
     }
 }
 

@@ -10,6 +10,18 @@ let extensionContextValid = true;
 let searchPageAutoCollected = false; // 防止搜索页面重复自动收集
 let hostPageAutoCollected = false; // 防止主机页面重复自动收集
 
+// 批量获取功能相关变量
+let batchFetchState = {
+    isRunning: false,
+    isPaused: false,
+    currentIndex: 0,
+    totalIPs: 0,
+    successCount: 0,
+    errorCount: 0,
+    ipList: [],
+    errors: []
+};
+
 // 检查扩展上下文是否有效
 function isExtensionContextValid() {
     try {
@@ -159,6 +171,48 @@ function createHostPageUI() {
         collectButton.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
     };
     
+    // 创建批量获取按钮
+    const batchFetchButton = document.createElement('button');
+    batchFetchButton.style.cssText = `
+        background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+        color: white;
+        border: none;
+        padding: 10px 16px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        transition: all 0.3s ease;
+        user-select: none;
+    `;
+    batchFetchButton.textContent = '🔄 批量获取IP详情';
+    batchFetchButton.title = '根据IP列表批量获取主机详情数据';
+    batchFetchButton.onclick = toggleBatchFetch;
+    batchFetchButton.onmouseover = () => {
+        batchFetchButton.style.transform = 'translateY(-2px)';
+        batchFetchButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+    };
+    batchFetchButton.onmouseout = () => {
+        batchFetchButton.style.transform = 'translateY(0)';
+        batchFetchButton.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
+    };
+    
+    // 创建批量获取进度显示
+    const batchProgressDiv = document.createElement('div');
+    batchProgressDiv.id = 'batch-progress';
+    batchProgressDiv.style.cssText = `
+        background: rgba(0,0,0,0.8);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 11px;
+        text-align: center;
+        backdrop-filter: blur(10px);
+        display: none;
+    `;
+    updateBatchProgress(batchProgressDiv);
+    
     // 创建统计显示
     const statsDiv = document.createElement('div');
     statsDiv.id = 'censys-stats';
@@ -175,7 +229,9 @@ function createHostPageUI() {
     
     container.appendChild(statusIndicator);
     container.appendChild(collectButton);
+    container.appendChild(batchFetchButton);
     container.appendChild(statsDiv);
+    container.appendChild(batchProgressDiv);
     
     document.body.appendChild(container);
     floatingButton = container;
@@ -449,6 +505,320 @@ async function collectDataFromPage() {
     }
 }
 
+// 批量获取IP详情功能
+async function toggleBatchFetch() {
+    if (batchFetchState.isRunning) {
+        // 如果正在运行，则暂停
+        pauseBatchFetch();
+    } else if (batchFetchState.isPaused) {
+        // 如果已暂停，则继续
+        resumeBatchFetch();
+    } else {
+        // 如果未开始，则开始批量获取
+        startBatchFetch();
+    }
+}
+
+// 开始批量获取
+async function startBatchFetch() {
+    try {
+        // 检查扩展上下文是否有效
+        if (!isExtensionContextValid()) {
+            showPageNotification('扩展上下文无效，无法进行批量获取', 'error');
+            return;
+        }
+        
+        // 获取IP列表
+        const result = await new Promise((resolve, reject) => {
+            chrome.storage.local.get(['ipList'], (result) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(result);
+                }
+            });
+        });
+        
+        const ipList = result.ipList || [];
+        
+        if (ipList.length === 0) {
+            showPageNotification('❌ 没有可用的IP列表，请先在搜索页面提取IP', 'error');
+            return;
+        }
+        
+        // 初始化批量获取状态
+        batchFetchState = {
+            isRunning: true,
+            isPaused: false,
+            currentIndex: 0,
+            totalIPs: ipList.length,
+            successCount: 0,
+            errorCount: 0,
+            ipList: [...ipList],
+            errors: []
+        };
+        
+        updateBatchFetchUI();
+        showPageNotification(`🚀 开始批量获取 ${ipList.length} 个IP的详情数据`, 'info');
+        
+        // 开始处理
+        await processBatchFetch();
+        
+    } catch (error) {
+        console.error('启动批量获取失败:', error);
+        showPageNotification('❌ 启动批量获取失败: ' + error.message, 'error');
+        resetBatchFetch();
+    }
+}
+
+// 暂停批量获取
+function pauseBatchFetch() {
+    if (batchFetchState.isRunning) {
+        batchFetchState.isPaused = true;
+        batchFetchState.isRunning = false;
+        updateBatchFetchUI();
+        showPageNotification('⏸️ 批量获取已暂停', 'info');
+    }
+}
+
+// 继续批量获取
+async function resumeBatchFetch() {
+    if (batchFetchState.isPaused) {
+        batchFetchState.isPaused = false;
+        batchFetchState.isRunning = true;
+        updateBatchFetchUI();
+        showPageNotification('▶️ 继续批量获取', 'info');
+        
+        // 继续处理
+        await processBatchFetch();
+    }
+}
+
+// 重置批量获取状态
+function resetBatchFetch() {
+    batchFetchState = {
+        isRunning: false,
+        isPaused: false,
+        currentIndex: 0,
+        totalIPs: 0,
+        successCount: 0,
+        errorCount: 0,
+        ipList: [],
+        errors: []
+    };
+    updateBatchFetchUI();
+}
+
+// 处理批量获取
+async function processBatchFetch() {
+    while (batchFetchState.currentIndex < batchFetchState.totalIPs && 
+           batchFetchState.isRunning && 
+           !batchFetchState.isPaused) {
+        
+        const currentIP = batchFetchState.ipList[batchFetchState.currentIndex];
+        
+        try {
+            console.log(`📡 正在获取第 ${batchFetchState.currentIndex + 1}/${batchFetchState.totalIPs} 个IP: ${currentIP}`);
+            
+            // 调用API获取主机数据
+            const hostData = await fetchSingleHostData(currentIP);
+            
+            if (hostData) {
+                // 保存数据
+                const saveSuccess = await saveHostDataToCache(hostData);
+                
+                if (saveSuccess) {
+                    batchFetchState.successCount++;
+                    console.log(`✅ 成功获取 ${currentIP} 的数据`);
+                    
+                    // 更新统计显示
+                    const statsDiv = document.getElementById('censys-stats');
+                    if (statsDiv) {
+                        updateStatsDisplay(statsDiv);
+                    }
+                } else {
+                    batchFetchState.errorCount++;
+                    batchFetchState.errors.push({
+                        ip: currentIP,
+                        error: '数据保存失败'
+                    });
+                }
+            } else {
+                batchFetchState.errorCount++;
+                batchFetchState.errors.push({
+                    ip: currentIP,
+                    error: '无法获取主机数据'
+                });
+                console.warn(`⚠️ 无法获取 ${currentIP} 的数据`);
+            }
+            
+        } catch (error) {
+            batchFetchState.errorCount++;
+            batchFetchState.errors.push({
+                ip: currentIP,
+                error: error.message
+            });
+            console.error(`❌ 获取 ${currentIP} 数据时出错:`, error);
+            
+            // 如果是严重错误（如网络错误、认证失败等），自动暂停
+            if (error.message.includes('404') || 
+                error.message.includes('403') || 
+                error.message.includes('429') ||
+                error.message.includes('Network')) {
+                
+                pauseBatchFetch();
+                showPageNotification(`❌ 获取 ${currentIP} 时遇到错误，已自动暂停: ${error.message}`, 'error');
+                return;
+            }
+        }
+        
+        batchFetchState.currentIndex++;
+        updateBatchFetchUI();
+        
+        // 添加延迟避免请求过快被封
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2秒延迟
+    }
+    
+    // 处理完成
+    if (batchFetchState.currentIndex >= batchFetchState.totalIPs) {
+        const successRate = ((batchFetchState.successCount / batchFetchState.totalIPs) * 100).toFixed(1);
+        showPageNotification(
+            `🎉 批量获取完成！成功: ${batchFetchState.successCount}, 失败: ${batchFetchState.errorCount}, 成功率: ${successRate}%`, 
+            'success'
+        );
+        
+        // 如果有错误，显示错误详情
+        if (batchFetchState.errors.length > 0) {
+            console.log('❌ 批量获取错误详情:', batchFetchState.errors);
+        }
+        
+        resetBatchFetch();
+    }
+}
+
+// 获取单个IP的主机数据
+async function fetchSingleHostData(ip) {
+    try {
+        // 构建API URL
+        const apiUrl = `https://platform.censys.io/hosts/${ip}?_data=routes/hosts.$id`;
+        
+        const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin',
+                'User-Agent': navigator.userAgent
+            },
+            credentials: 'include'
+        });
+        
+        if (response.ok) {
+            const jsonData = await response.json();
+            
+            // 检查响应是否包含有效的主机数据
+            if (!jsonData || typeof jsonData !== 'object') {
+                throw new Error('API返回无效的JSON数据');
+            }
+            
+            // 检查是否是错误响应
+            if (jsonData.error || jsonData.message) {
+                throw new Error(jsonData.error || jsonData.message);
+            }
+            
+            // 创建主机数据对象
+            const hostData = {
+                ip: ip,
+                ports: [],
+                dns: '',
+                country: '',
+                city: '',
+                province: '',
+                isp: ''
+            };
+            
+            // 从API响应中提取数据
+            const extractedData = extractHostFieldsFromAPIResponse(jsonData, hostData);
+            
+            if (!extractedData) {
+                throw new Error('API响应中没有有效的主机数据');
+            }
+            
+            return hostData;
+            
+        } else {
+            // 处理HTTP错误状态码
+            if (response.status === 404) {
+                throw new Error(`主机 ${ip} 不存在`);
+            } else if (response.status === 403) {
+                throw new Error('访问被拒绝，可能需要重新登录');
+            } else if (response.status === 429) {
+                throw new Error('请求过于频繁，已被限制');
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+        }
+        
+    } catch (error) {
+        console.warn(`❌ 获取主机 ${ip} 数据时出错:`, error);
+        throw error;
+    }
+}
+
+// 更新批量获取UI状态
+function updateBatchFetchUI() {
+    const batchButton = document.querySelector('button[title*="批量获取"]');
+    const batchProgressDiv = document.getElementById('batch-progress');
+    
+    if (batchButton) {
+        if (batchFetchState.isRunning) {
+            batchButton.textContent = '⏸️ 暂停批量获取';
+            batchButton.style.background = 'linear-gradient(45deg, #ffc107, #e0a800)';
+            batchButton.title = '暂停批量获取进程';
+        } else if (batchFetchState.isPaused) {
+            batchButton.textContent = '▶️ 继续批量获取';
+            batchButton.style.background = 'linear-gradient(45deg, #28a745, #20c997)';
+            batchButton.title = '继续批量获取进程';
+        } else {
+            batchButton.textContent = '🔄 批量获取IP详情';
+            batchButton.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a52)';
+            batchButton.title = '根据IP列表批量获取主机详情数据';
+        }
+    }
+    
+    if (batchProgressDiv) {
+        if (batchFetchState.isRunning || batchFetchState.isPaused) {
+            batchProgressDiv.style.display = 'block';
+            updateBatchProgress(batchProgressDiv);
+        } else {
+            batchProgressDiv.style.display = 'none';
+        }
+    }
+}
+
+// 更新批量获取进度显示
+function updateBatchProgress(progressDiv) {
+    if (!progressDiv) return;
+    
+    if (batchFetchState.totalIPs > 0) {
+        const progress = ((batchFetchState.currentIndex / batchFetchState.totalIPs) * 100).toFixed(1);
+        const statusText = batchFetchState.isPaused ? '已暂停' : 
+                          batchFetchState.isRunning ? '进行中' : '未开始';
+        
+        progressDiv.innerHTML = `
+            <div>批量获取: ${statusText}</div>
+            <div>进度: ${batchFetchState.currentIndex}/${batchFetchState.totalIPs} (${progress}%)</div>
+            <div>成功: ${batchFetchState.successCount} | 失败: ${batchFetchState.errorCount}</div>
+        `;
+    } else {
+        progressDiv.textContent = '批量获取: 等待开始';
+    }
+}
+
 // 从页面提取IP列表
 async function extractIPsFromPage() {
     try {
@@ -700,6 +1070,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 setTimeout(checkAndAutoCollectHostData, 1000);
             }
             break;
+            
+        case 'toggleBatchFetch':
+            toggleBatchFetch()
+                .then(() => {
+                    sendResponse({ 
+                        success: true, 
+                        message: batchFetchState.isRunning ? '批量获取已启动' : 
+                                batchFetchState.isPaused ? '批量获取已暂停' : '批量获取已停止'
+                    });
+                })
+                .catch(error => {
+                    sendResponse({ success: false, message: error.message });
+                });
+            return true; // 保持消息通道开放
             
         default:
             sendResponse({ success: false, error: '未知操作' });

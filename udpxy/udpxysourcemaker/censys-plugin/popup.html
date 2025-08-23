@@ -75,6 +75,18 @@
             background: linear-gradient(45deg, #28a745, #20c997);
         }
         
+        .batch-button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+        }
+        
+        .batch-button.running {
+            background: linear-gradient(45deg, #ffc107, #e0a800);
+        }
+        
+        .batch-button.paused {
+            background: linear-gradient(45deg, #28a745, #20c997);
+        }
+        
         .status {
             padding: 10px;
             border-radius: 4px;
@@ -177,6 +189,7 @@
             💡 页面上已显示浮动按钮，可直接操作无需打开插件
         </p>
         <button id="autoCollectBtn" class="button auto-button">🤖 自动收集模式</button>
+        <button id="batchFetchBtn" class="button batch-button">🔄 批量获取IP详情</button>
         <button id="downloadCSVBtn" class="button" disabled>💾 导出CSV</button>
         <button id="clearCacheBtn" class="button">🗑️ 清空缓存</button>
         <button id="viewStatsBtn" class="button">� 查看详细统计</button>
