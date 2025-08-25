@@ -77,7 +77,7 @@ class UDPXYSourceMaker:
             "anhui", "beijing", "chongqing", "fujian", "gansu", "guangdong", 
             "guangxi", "guizhou", "hainan", "hebei", "heilongjiang", "henan", 
             "hubei", "hunan", "jiangsu", "jiangxi", "jilin", "liaoning", 
-            "neimenggu", "ningxia", "qinghai", "shaanxi", "shandong", "shanghai", 
+            "neimenggu", "ningxia", "qinghai", "shan3xi", "shandong", "shanghai", 
             "shanxi", "sichuan", "tianjin", "xinjiang", "xizang", "yunnan", "zhejiang"
         ]
         
@@ -293,7 +293,7 @@ class UDPXYSourceMaker:
                     'neimenggu': ['inner mongolia', 'neimenggu', '内蒙古'],
                     'ningxia': ['ningxia', '宁夏'],
                     'qinghai': ['qinghai', '青海'],
-                    'shaanxi': ['shaanxi', '陕西'],
+                    'shan3xi': ['shan3xi', 'shaanxi', '陕西'],
                     'shandong': ['shandong', '山东'],
                     'shanghai': ['shanghai', '上海'],
                     'shanxi': ['shanxi', '山西'],
