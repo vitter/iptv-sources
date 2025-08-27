@@ -221,7 +221,7 @@ class IPTVSourceCollector:
             if self.region:
                 return f' && (org="{self.region} Mobile Communication Company Limited" || org="{self.region} Mobile Communications Co." || org="China Mobile Communicaitons Corporation" || org="China Mobile Group {self.region} communications corporation" || org="China Mobile Group {self.region} Co.")'
             else:
-                return f' && (org="China Mobile Communicaitons Corporation")'
+                return f' && (asn="9808" || asn="56048" || asn="24400" || asn="56040" || asn="56046" || asn="24138" || asn="56041" || asn="38019" || asn="24444" || asn="9394" || asn="141425" || asn="140895" || asn="24547" || asn="139080" || asn="56047" || asn="56044" || asn="56042" || asn="138407" || asn="134810" || asn="132525" || asn="56045" || asn="45057" || asn="24445" || asn="140105" || asn="135054" || asn="132510")'
         elif self.isp == 'Unicom':
             if self.region:
                 return f' && (org="CHINA UNICOM China169 Backbone" || org="China Unicom" || org="China Unicom IP network" || org="CHINA UNICOM Industrial Internet Backbone" || org="China Unicom {self.region} network" || org="China Unicom {self.region} IP network" || org="China Unicom {self.region} Province Network" || org="UNICOM {self.region} province network" || org="China Unicom IP network China169 {self.region} province")'
