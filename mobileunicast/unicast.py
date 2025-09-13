@@ -344,80 +344,326 @@ class UnicastProcessor:
         
         return name
     
+    def _create_streaming_session(self):
+        """创建针对流媒体优化的会话"""
+        session = requests.Session()
+        
+        # 使用VLC播放器的User-Agent，但保持简单的headers
+        session.headers.update({
+            'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16'
+        })
+        
+        return session
+
     def test_stream_speed(self, channel: ChannelInfo, timeout=8):
-        """测试单个流媒体速度"""
-        try:
-            # 创建会话，设置更短的超时
-            session = requests.Session()
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            })
-            
-            # 如果是M3U8流，先获取M3U8文件内容
-            if channel.url.endswith('.m3u8'):
-                return self._test_m3u8_speed(session, channel, timeout)
-            else:
-                return self._test_direct_stream_speed(session, channel, timeout)
-            
-        except Exception as e:
-            # 可以记录具体错误信息用于调试
-            pass
+        """测试单个流媒体速度 - 使用VLC User-Agent"""
+        # 增加重试机制，某些IPTV源可能需要多次尝试
+        max_retries = 2
+        
+        for attempt in range(max_retries):
+            try:
+                # 创建流媒体优化的会话
+                session = self._create_streaming_session()
+                
+                # 处理带查询参数的URL，如 .m3u8?xxx
+                # 修复: 原来使用 endswith('.m3u8') 无法正确识别带查询参数的M3U8 URL
+                url_path = channel.url.split('?')[0]  # 去掉查询参数部分
+                if url_path.endswith('.m3u8'):
+                    result = self._test_m3u8_speed(session, channel, timeout)
+                else:
+                    result = self._test_direct_stream_speed(session, channel, timeout)
+                
+                # 如果测试成功（速度 > 0），直接返回结果
+                if result.speed > 0:
+                    return result
+                    
+                # 如果是最后一次尝试，返回失败结果
+                if attempt == max_retries - 1:
+                    return result
+                    
+            except Exception as e:
+                # 记录错误但继续尝试
+                if attempt == max_retries - 1:
+                    # 最后一次尝试也失败了
+                    pass
         
         channel.speed = 0.0
         return channel
     
-    def _test_m3u8_speed(self, session, channel: ChannelInfo, timeout=8):
-        """测试M3U8流媒体速度"""
-        try:
-            # 1. 获取M3U8文件 - 缩短超时时间
-            m3u8_response = session.get(channel.url, timeout=5)
-            m3u8_response.raise_for_status()
-            m3u8_content = m3u8_response.text
+    def _test_problematic_iptv_server(self, session, channel: ChannelInfo):
+        """专门处理有问题的IPTV服务器，使用完整浏览器模拟"""
+        
+        # 识别ZTE OTT服务器（路径包含030000001000且URL以m3u8?结尾的典型特征）
+        is_zte_ott = ('000000' in channel.url and channel.url.endswith('m3u8?'))
+        
+        if is_zte_ott:
+            print(f"  检测到ZTE OTT服务器，尝试特殊处理: {channel.name}")
             
-            # 2. 解析M3U8文件，提取TS分片URL
+            # 方法1: 完整浏览器模拟
+            browser_result = self._browser_simulation_test(channel)
+            if browser_result:
+                return browser_result
+            
+            # 方法2: 尝试不同的User-Agent（回退方案）
+            user_agents = [
+                'VLC/3.0.16 LibVLC/3.0.16',
+                'ffmpeg/4.4.0', 
+                'curl/8.5.0',
+                'Mozilla/5.0 (compatible; IPTV-Player)',
+            ]
+            
+            for ua in user_agents:
+                try:
+                    test_session = requests.Session()
+                    test_session.headers.update({'User-Agent': ua})
+                    
+                    # 尝试访问
+                    response = test_session.get(channel.url, timeout=8, allow_redirects=True)
+                    
+                    if response.status_code == 200 and response.text.strip().startswith('#EXTM3U'):
+                        print(f"  ✓ 使用 {ua} 成功")
+                        return self._calculate_speed_from_m3u8(test_session, channel, response.text)
+                    
+                    # 如果是302重定向，手动处理
+                    if response.history:
+                        print(f"  发现重定向历史: {[r.url for r in response.history]}")
+                        if response.text.strip().startswith('#EXTM3U'):
+                            return self._calculate_speed_from_m3u8(test_session, channel, response.text)
+                    
+                except Exception as e:
+                    continue
+            
+            # 如果所有方法都失败，标记为问题源
+            print(f"  ✗ 所有方法都失败，可能是服务器临时不可用")
+            
+        return None
+
+    def _browser_simulation_test(self, channel: ChannelInfo):
+        """完整的浏览器模拟测试，专门处理ZTE OTT服务器"""
+        try:
+            # 方法1: 使用urllib（ZTE OTT服务器拒绝requests但接受urllib）
+            import urllib.request
+            import urllib.error
+            
+            print(f"    🌐 使用urllib模拟浏览器访问...")
+            
+            # 创建请求
+            req = urllib.request.Request(channel.url)
+            req.add_header('User-Agent', 'curl/8.5.0')
+            req.add_header('Accept', '*/*')
+            
+            try:
+                # 发送请求
+                response = urllib.request.urlopen(req, timeout=10)
+                
+                if response.status == 200:
+                    print(f"    ✅ urllib访问成功，状态码: {response.status}")
+                    
+                    # 读取M3U8内容进行验证
+                    content = response.read(500).decode('utf-8', errors='ignore')
+                    
+                    if '#EXTM3U' in content:
+                        print(f"    🎯 确认M3U8格式，开始速度测试...")
+                        
+                        # 重新打开连接进行速度测试
+                        req2 = urllib.request.Request(channel.url)
+                        req2.add_header('User-Agent', 'curl/8.5.0')
+                        req2.add_header('Accept', '*/*')
+                        
+                        response2 = urllib.request.urlopen(req2, timeout=10)
+                        
+                        # 速度测试
+                        start_time = time.time()
+                        total_size = 0
+                        chunk_count = 0
+                        
+                        while chunk_count < 50:  # 读取更多数据以获得准确速度
+                            chunk = response2.read(8192)
+                            if not chunk:
+                                break
+                            total_size += len(chunk)
+                            chunk_count += 1
+                            
+                            # 避免测试时间过长
+                            if time.time() - start_time > 8:
+                                break
+                        
+                        end_time = time.time()
+                        duration = end_time - start_time
+                        response2.close()
+                        
+                        if total_size > 0 and duration > 0:
+                            speed_mbps = (total_size / duration) / (1024 * 1024)
+                            channel.speed = round(max(speed_mbps, 0.1), 2)
+                            print(f"    🚀 urllib成功，速度: {channel.speed} MB/s")
+                            return channel
+                    else:
+                        print(f"    ❌ 不是有效的M3U8内容")
+                        
+                response.close()
+                        
+            except urllib.error.HTTPError as e:
+                if e.code == 302:
+                    # 处理重定向
+                    redirect_url = e.headers.get('Location')
+                    if redirect_url:
+                        print(f"    📡 检测到302重定向，尝试访问: {redirect_url[:60]}...")
+                        
+                        req_redirect = urllib.request.Request(redirect_url)
+                        req_redirect.add_header('User-Agent', 'curl/8.5.0')
+                        req_redirect.add_header('Accept', '*/*')
+                        
+                        response_redirect = urllib.request.urlopen(req_redirect, timeout=10)
+                        
+                        if response_redirect.status == 200:
+                            content = response_redirect.read(300).decode('utf-8', errors='ignore')
+                            if '#EXTM3U' in content:
+                                print(f"    ✅ 重定向后成功获取M3U8")
+                                # 简化的速度测试
+                                channel.speed = 1.0  # 给一个合理的默认速度
+                                response_redirect.close()
+                                return channel
+                        response_redirect.close()
+                else:
+                    print(f"    ❌ urllib HTTP错误: {e.code}")
+            
+            # 方法2: 回退到requests的浏览器模拟（用于其他类型服务器）
+            print(f"    🔄 urllib失败，尝试requests浏览器模拟...")
+            return self._requests_browser_simulation(channel)
+            
+        except Exception as e:
+            print(f"    ❌ 浏览器模拟失败: {str(e)[:50]}")
+            
+        return None
+
+    def _requests_browser_simulation(self, channel: ChannelInfo):
+        """使用requests的浏览器模拟（回退方案）"""
+        try:
+            browser_session = requests.Session()
+            
+            browser_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            browser_session.headers.update(browser_headers)
+            
+            response = browser_session.get(channel.url, timeout=10, allow_redirects=False)
+            
+            if response.status_code == 302:
+                redirect_url = response.headers.get('Location')
+                if redirect_url and 'IASHttpSessionId' in redirect_url:
+                    final_response = browser_session.get(redirect_url, timeout=10, stream=True)
+                    
+                    if final_response.status_code == 200:
+                        content_sample = ''
+                        total_size = 0
+                        start_time = time.time()
+                        
+                        for chunk in final_response.iter_content(chunk_size=8192):
+                            if chunk:
+                                total_size += len(chunk)
+                                if not content_sample:
+                                    content_sample = chunk.decode('utf-8', errors='ignore')[:300]
+                                    if '#EXTM3U' not in content_sample:
+                                        browser_session.close()
+                                        return None
+                                
+                                if total_size >= 100*1024:  # 100KB
+                                    break
+                        
+                        end_time = time.time()
+                        duration = end_time - start_time
+                        
+                        if total_size > 0 and duration > 0:
+                            speed_mbps = (total_size / duration) / (1024 * 1024)
+                            channel.speed = round(max(speed_mbps, 0.1), 2)
+                            browser_session.close()
+                            return channel
+                            
+            elif response.status_code == 200:
+                content = response.text[:300]
+                if '#EXTM3U' in content:
+                    channel.speed = 1.0  # 默认速度
+                    browser_session.close()
+                    return channel
+            
+            browser_session.close()
+            
+        except Exception:
+            pass
+            
+        return None
+    
+    def _calculate_speed_from_m3u8(self, session, channel: ChannelInfo, m3u8_content):
+        """从M3U8内容计算速度"""
+        try:
+            # 解析M3U8文件，提取TS分片URL
             ts_urls = self._extract_ts_urls(m3u8_content, channel.url)
             
             if not ts_urls:
                 channel.speed = 0.0
                 return channel
             
-            # 3. 只测试第一个TS分片的速度，减少测试时间
+            # 测试第一个TS分片的速度
             ts_url = ts_urls[0]
             start_time = time.time()
             
-            try:
-                response = session.get(ts_url, stream=True, timeout=5)
-                response.raise_for_status()
-                
-                downloaded_size = 0
-                target_size = 2 * 1024 * 1024  # 降低到2MB
-                
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        downloaded_size += len(chunk)
-                        
-                    # 如果测试时间超过5秒就停止
-                    current_time = time.time()
-                    if (current_time - start_time) > 5:
-                        break
-                        
-                    # 达到目标大小就停止
-                    if downloaded_size >= target_size:
-                        break
-                
-                elapsed_time = time.time() - start_time
-                min_size = 256 * 1024  # 最少256KB才计算速度
-                
-                if elapsed_time > 0 and downloaded_size >= min_size:
-                    speed = downloaded_size / elapsed_time / 1024 / 1024  # MB/s
-                    channel.speed = round(speed, 2)
-                else:
-                    channel.speed = 0.0
+            response = session.get(ts_url, stream=True, timeout=5)
+            response.raise_for_status()
+            
+            downloaded_size = 0
+            target_size = 1 * 1024 * 1024  # 1MB
+            
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    downloaded_size += len(chunk)
                     
-            except Exception:
+                current_time = time.time()
+                if (current_time - start_time) > 4:
+                    break
+                    
+                if downloaded_size >= target_size:
+                    break
+            
+            elapsed_time = time.time() - start_time
+            min_size = 128 * 1024  # 最少128KB才计算速度
+            
+            if elapsed_time > 0 and downloaded_size >= min_size:
+                speed = downloaded_size / elapsed_time / 1024 / 1024  # MB/s
+                channel.speed = round(speed, 2)
+            else:
                 channel.speed = 0.0
                 
             return channel
+            
+        except Exception:
+            channel.speed = 0.0
+            return channel
+
+    def _test_m3u8_speed(self, session, channel: ChannelInfo, timeout=8):
+        """测试M3U8流媒体速度 - 支持问题服务器特殊处理"""
+        try:
+            # 首先检查是否是已知的问题服务器
+            special_result = self._test_problematic_iptv_server(session, channel)
+            if special_result is not None:
+                return special_result
+            
+            # 标准的M3U8测试流程
+            m3u8_response = session.get(channel.url, timeout=5)
+            m3u8_response.raise_for_status()
+            m3u8_content = m3u8_response.text
+            
+            # 检查是否是有效的M3U8内容
+            if not m3u8_content.strip().startswith('#EXTM3U'):
+                channel.speed = 0.0
+                return channel
+            
+            return self._calculate_speed_from_m3u8(session, channel, m3u8_content)
             
         except Exception:
             channel.speed = 0.0
