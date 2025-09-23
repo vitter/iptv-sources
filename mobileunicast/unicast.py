@@ -380,6 +380,7 @@ class UnicastProcessor:
             r'50P',
             r'HEVC',
             r'HDR',
+            r'CHD',
             r'HD',
             r'NEWTV',
             r'SITV',
