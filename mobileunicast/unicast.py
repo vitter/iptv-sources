@@ -431,6 +431,7 @@ class UnicastProcessor:
             r'CCTV16奥林匹克': 'CCTV16',
             r'CCTV164K': 'CCTV16',
             r'CCTV4K测试': 'CCTV4K',
+            r'CCTV4K4K': 'CCTV4K',
             r'CCTV17农业农村': 'CCTV17',
             r'CGTN1': 'CGTN',
             r'CGTN2': 'CGTN纪录',
