@@ -331,16 +331,101 @@ class UnicastProcessor:
     
     def _normalize_channel_name(self, name):
         """统一频道名称格式"""
+        # 1. 先转换为大写
+        name = name.upper()
+        
+        # 2. 按顺序删除指定字符和内容
+        remove_patterns = [
+            r'\s+',  # 空格
+            r'-',    # 连字符
+            r'\*',   # 星号
+            r'高清测试',
+            r'高清',
+            r'标清',
+            r'HD',
+            r'UD',
+            r'超高清',
+            r'超清',
+            r'\(试用\)',
+            r'\(测试\)',
+            r'\(试看\)',
+            r'\(576P\)',
+            r'\(720P\)',
+            r'\(1080P\)',
+            r'『',
+            r'』',
+            r'｜',
+            r'\(',
+            r'\)',
+            r'1M',
+            r'2M',
+            r'3M',
+            r'3\.5M',
+            r'4M',
+            r'5M',
+            r'6M',
+            r'7M',
+            r'7\.5M',
+            r'8M',
+            r'9M',
+            r'10M',
+            r'12M',
+            r'17M',
+            r'22M',
+            r'576',
+            r'720',
+            r'1080',
+            r'2160',
+            r'50P',
+            r'1920X1080',
+            r'HEVC',
+            r'HDR',
+            r'NEWTV',
+            r'SITV',
+            r'IHOT',
+            r'UTV',
+            r'IPTV'
+        ]
+        
+        for pattern in remove_patterns:
+            name = re.sub(pattern, '', name)
+        
+        # 3. 现有的CCTV和CGTN规则
         # 将CCTV-1统一为CCTV1，CGTN-英语统一为CGTN英语等
-        name = re.sub(r'CCTV-(\d+)', r'CCTV\1', name, flags=re.IGNORECASE)
-        name = re.sub(r'CGTN-(\w+)', r'CGTN\1', name, flags=re.IGNORECASE)
+        name = re.sub(r'CCTV-?(\d+)', r'CCTV\1', name)
+        name = re.sub(r'CGTN-?(\w+)', r'CGTN\1', name)
         
         # CCTV频道特殊处理：除了CCTV5+，其他CCTV频道去除+、-、空格、*符号
-        if re.match(r'CCTV', name, re.IGNORECASE):
+        if re.match(r'CCTV', name):
             # 保护CCTV5+不被修改
-            if not re.match(r'CCTV5\+', name, re.IGNORECASE):
+            if not re.match(r'CCTV5\+', name):
                 # 去除+、-、空格、*符号
                 name = re.sub(r'[+\-\s*]', '', name)
+        
+        # 4. 处理CCTV数字后的文字说明
+        cctv_replacements = {
+            r'CCTV1综合': 'CCTV1',
+            r'CCTV2财经': 'CCTV2',
+            r'CCTV3综艺': 'CCTV3',
+            r'CCTV4中文国际': 'CCTV4',
+            r'CCTV5体育': 'CCTV5',
+            r'CCTV5\+体育赛事': 'CCTV5+',  # 特殊保留5+
+            r'CCTV6电影': 'CCTV6',
+            r'CCTV7国防军事': 'CCTV7',
+            r'CCTV8电视剧': 'CCTV8',
+            r'CCTV9纪录': 'CCTV9',
+            r'CCTV10科教': 'CCTV10',
+            r'CCTV11戏曲': 'CCTV11',
+            r'CCTV12社会与法': 'CCTV12',
+            r'CCTV13新闻': 'CCTV13',
+            r'CCTV14少儿': 'CCTV14',
+            r'CCTV15音乐': 'CCTV15',
+            r'CCTV16奥林匹克': 'CCTV16',
+            r'CCTV17农业农村': 'CCTV17'
+        }
+        
+        for pattern, replacement in cctv_replacements.items():
+            name = re.sub(pattern, replacement, name)
         
         return name
     
