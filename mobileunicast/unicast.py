@@ -387,10 +387,10 @@ class UnicastProcessor:
             r'NEWTV',
             r'SITV',
             r'IHOT',
-            r'HOT',
             r'UTV',
             r'NNM',
             r'IPTV',
+            r'IPV4',
             r'IPV6'
         ]
         
