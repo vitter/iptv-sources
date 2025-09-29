@@ -418,6 +418,7 @@ class UnicastProcessor:
             r'CCTV5中文国际': 'CCTV4',
             r'CCTV5体育': 'CCTV5',
             r'CCTV5\+体育赛事': 'CCTV5+',  # 特殊保留5+
+            r'CCTV5\+体育': 'CCTV5+', 
             r'CCTV6电影': 'CCTV6',
             r'CCTV7国防军事': 'CCTV7',
             r'CCTV7咪咕': 'CCTV7',
