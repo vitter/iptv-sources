@@ -434,7 +434,7 @@ class UnicastProcessor:
             r'CCTV少儿': 'CCTV14',
             r'CCTV15音乐': 'CCTV15',
             r'CCTV16奥林匹克': 'CCTV16',
-            r'CCTV164K': 'CCTV16',
+            r'CCTV164K': 'CCTV16-4K',
             r'CCTV4K测试': 'CCTV4K',
             r'CCTV4K4K': 'CCTV4K',
             r'CCTV17农业农村': 'CCTV17',
