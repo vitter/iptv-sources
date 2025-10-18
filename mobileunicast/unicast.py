@@ -460,15 +460,71 @@ class UnicastProcessor:
         """创建针对流媒体优化的会话"""
         session = requests.Session()
         
+        # 配置重定向处理
+        session.max_redirects = 10
+        
         # 使用VLC播放器的User-Agent，但保持简单的headers
         session.headers.update({
-            'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16'
+            'User-Agent': 'VLC/3.0.16 LibVLC/3.0.16',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive'
         })
         
+        # 设置适配器超时和重试策略
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        
+        retry_strategy = Retry(
+            total=2,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
         return session
+    
+    def _follow_redirects_manual(self, url, timeout=5):
+        """手动跟踪重定向链，解决302重定向问题"""
+        redirects_followed = 0
+        current_url = url
+        max_redirects = 10
+        
+        while redirects_followed < max_redirects:
+            try:
+                # 使用HEAD请求检查重定向，减少流量
+                response = requests.head(current_url, timeout=timeout, allow_redirects=False)
+                
+                if response.status_code in [301, 302, 303, 307, 308]:
+                    # 获取重定向位置
+                    location = response.headers.get('Location')
+                    if not location:
+                        break
+                    
+                    # 处理相对URL
+                    if not location.startswith('http'):
+                        import urllib.parse
+                        current_url = urllib.parse.urljoin(current_url, location)
+                    else:
+                        current_url = location
+                    
+                    redirects_followed += 1
+                    
+                elif response.status_code == 200:
+                    return current_url
+                else:
+                    break
+                    
+            except Exception:
+                # 重定向失败时返回原始URL
+                return url
+        
+        return current_url
 
     def test_stream_speed(self, channel: ChannelInfo, timeout=8):
-        """测试单个流媒体速度 - 使用VLC User-Agent"""
+        """测试单个流媒体速度 - 增强302重定向支持"""
         # 增加重试机制，某些IPTV源可能需要多次尝试
         max_retries = 2
         
@@ -477,13 +533,23 @@ class UnicastProcessor:
                 # 创建流媒体优化的会话
                 session = self._create_streaming_session()
                 
-                # 处理带查询参数的URL，如 .m3u8?xxx
-                # 修复: 原来使用 endswith('.m3u8') 无法正确识别带查询参数的M3U8 URL
-                url_path = channel.url.split('?')[0]  # 去掉查询参数部分
-                if url_path.endswith('.m3u8'):
-                    result = self._test_m3u8_speed(session, channel, timeout)
+                # 首先跟踪重定向获取最终URL，使用较短超时避免卡死
+                redirect_timeout = min(timeout, 5)
+                final_url = self._follow_redirects_manual(channel.url, redirect_timeout)
+                
+                # 根据最终URL判断类型
+                final_url_path = final_url.split('?')[0]
+                if final_url_path.endswith('.m3u8') or 'm3u8' in final_url:
+                    # 使用最终URL创建新的频道对象进行M3U8测试
+                    test_channel = ChannelInfo(channel.name, final_url, 0.0)
+                    result = self._test_m3u8_speed(session, test_channel, timeout)
                 else:
-                    result = self._test_direct_stream_speed(session, channel, timeout)
+                    # 可能是直接流或其他格式
+                    test_channel = ChannelInfo(channel.name, final_url, 0.0)
+                    result = self._test_direct_stream_speed(session, test_channel, timeout)
+                
+                # 保持原始URL但使用测试结果
+                result.url = channel.url
                 
                 # 如果测试成功（速度 > 0），直接返回结果
                 if result.speed > 0:
@@ -712,7 +778,7 @@ class UnicastProcessor:
         return None
     
     def _calculate_speed_from_m3u8(self, session, channel: ChannelInfo, m3u8_content):
-        """从M3U8内容计算速度"""
+        """从M3U8内容计算速度 - 增强版多TS测试"""
         try:
             # 解析M3U8文件，提取TS分片URL
             ts_urls = self._extract_ts_urls(m3u8_content, channel.url)
@@ -721,33 +787,48 @@ class UnicastProcessor:
                 channel.speed = 0.0
                 return channel
             
-            # 测试第一个TS分片的速度
-            ts_url = ts_urls[0]
-            start_time = time.time()
+            # 尝试测试多个TS分片，提高成功率
+            test_count = min(3, len(ts_urls))
+            successful_tests = 0
+            total_speed = 0.0
             
-            response = session.get(ts_url, stream=True, timeout=5)
-            response.raise_for_status()
-            
-            downloaded_size = 0
-            target_size = 1 * 1024 * 1024  # 1MB
-            
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    downloaded_size += len(chunk)
+            for i in range(test_count):
+                ts_url = ts_urls[i]
+                
+                try:
+                    start_time = time.time()
+                    response = session.get(ts_url, stream=True, timeout=6)
+                    response.raise_for_status()
                     
-                current_time = time.time()
-                if (current_time - start_time) > 4:
-                    break
+                    downloaded_size = 0
+                    target_size = 500 * 1024  # 降低目标到500KB
                     
-                if downloaded_size >= target_size:
-                    break
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            downloaded_size += len(chunk)
+                            
+                        current_time = time.time()
+                        if (current_time - start_time) > 5:  # 增加超时时间
+                            break
+                            
+                        if downloaded_size >= target_size:
+                            break
+                    
+                    elapsed_time = time.time() - start_time
+                    min_size = 32 * 1024  # 降低最小要求到32KB
+                    
+                    if elapsed_time > 0.1 and downloaded_size >= min_size:  # 最少0.1秒
+                        speed = downloaded_size / elapsed_time / 1024 / 1024  # MB/s
+                        total_speed += speed
+                        successful_tests += 1
+                        
+                except Exception:
+                    continue
             
-            elapsed_time = time.time() - start_time
-            min_size = 128 * 1024  # 最少128KB才计算速度
-            
-            if elapsed_time > 0 and downloaded_size >= min_size:
-                speed = downloaded_size / elapsed_time / 1024 / 1024  # MB/s
-                channel.speed = round(speed, 2)
+            # 计算平均速度
+            if successful_tests > 0:
+                avg_speed = total_speed / successful_tests
+                channel.speed = round(avg_speed, 2)
             else:
                 channel.speed = 0.0
                 
@@ -758,15 +839,15 @@ class UnicastProcessor:
             return channel
 
     def _test_m3u8_speed(self, session, channel: ChannelInfo, timeout=8):
-        """测试M3U8流媒体速度 - 支持问题服务器特殊处理"""
+        """测试M3U8流媒体速度 - 直接使用已重定向的URL"""
         try:
-            # 首先检查是否是已知的问题服务器
+            # 首先检查是否是已知的问题服务器（保留原有特殊处理）
             special_result = self._test_problematic_iptv_server(session, channel)
             if special_result is not None:
                 return special_result
             
-            # 标准的M3U8测试流程
-            m3u8_response = session.get(channel.url, timeout=5)
+            # 标准的M3U8测试流程（URL已经是重定向后的）
+            m3u8_response = session.get(channel.url, timeout=timeout)
             m3u8_response.raise_for_status()
             m3u8_content = m3u8_response.text
             
@@ -800,31 +881,44 @@ class UnicastProcessor:
         return ts_urls
     
     def _test_direct_stream_speed(self, session, channel: ChannelInfo, timeout=8):
-        """测试直接流媒体速度"""
+        """测试直接流媒体速度 - 增强超时控制"""
         try:
-            # 下载前2MB数据计算速度，缩短测试时间
-            response = session.get(channel.url, stream=True, timeout=timeout)
+            # 添加连接超时和读取超时，下载目标降低到1MB
+            response = session.get(
+                channel.url, 
+                stream=True, 
+                timeout=(5, timeout),  # (连接超时, 读取超时)
+                allow_redirects=True
+            )
             response.raise_for_status()
             
             downloaded_size = 0
-            target_size = 2 * 1024 * 1024  # 2MB
-            min_size = 256 * 1024  # 最少下载256KB才计算速度
+            target_size = 1 * 1024 * 1024  # 降低到1MB
+            min_size = 64 * 1024  # 降低最小要求到64KB
             
             # 记录开始下载数据的时间
             data_start_time = time.time()
+            max_download_time = 3  # 最多下载3秒
             
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    downloaded_size += len(chunk)
-                    current_time = time.time()
-                    
-                    # 如果下载时间超过5秒就停止
-                    if (current_time - data_start_time) > 5:
-                        break
+            try:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        downloaded_size += len(chunk)
+                        current_time = time.time()
                         
-                    # 达到目标大小就停止
-                    if downloaded_size >= target_size:
-                        break
+                        # 如果下载时间超过限制就停止
+                        if (current_time - data_start_time) > max_download_time:
+                            break
+                            
+                        # 达到目标大小就停止
+                        if downloaded_size >= target_size:
+                            break
+            except Exception:
+                # 下载过程异常，使用已下载的数据
+                pass
+            finally:
+                # 确保响应被关闭
+                response.close()
             
             # 计算速度
             elapsed_time = time.time() - data_start_time
