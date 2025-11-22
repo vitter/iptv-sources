@@ -146,9 +146,16 @@ class UnicastProcessor:
 "银川", "石嘴山", "吴忠", "固原", "中卫",
 "乌鲁木齐", "克拉玛依", "吐鲁番", "哈密", "昌吉回族自治州", "博尔塔拉蒙古自治州", "巴音郭楞蒙古自治州", "阿克苏地区", "克孜勒苏柯尔克孜自治州", "喀什地区", "和田地区", "伊犁哈萨克自治州", "塔城地区", "阿勒泰地区")
     
-    def __init__(self, top_count=20, proxy=None):
+    def __init__(self, top_count=20, proxy=None, spread=True, group_by='domain', max_workers=None):
         self.top_count = top_count
         self.proxy = proxy
+        # 是否在测速前将同源地址打散（默认 True）。
+        # 打散后会尽量交替来自不同域名的地址，减少并发对单一服务器的压力。
+        self.spread = spread
+        # 分组策略：'domain'（按域名/host分组，默认），'ip'（按IP分组，去端口），'subnet'（按子网分组，IPv4 /24，IPv6 取前4段）
+        self.group_by = group_by
+        # 最大并发工作线程数（None 表示使用内置默认）
+        self.max_workers = max_workers
         self.download_dir = Path("downloads")
         self.output_dir = Path("output")
         self.temp_file = Path("txt.tmp")  # 汇总临时文件
@@ -259,6 +266,98 @@ class UnicastProcessor:
         unique_filename = f"{prefix}_{name_without_ext}.txt"
         
         return unique_filename
+
+    def _spread_channels_across_domains(self, channels):
+        """按源分桶并轮询抽取以打散顺序。
+
+        分组策略由 `self.group_by` 控制：
+        - 'domain'：按 host/domain 分组（默认）。
+        - 'ip'：按解析得到的 IP（去端口）分组；对直接以 IP 表示的 URL 会直接使用该 IP。
+        - 'subnet'：按子网分组；IPv4 使用 /24（前三个八位字节），IPv6 使用前四段（可视作 /64 的近似）。
+
+        返回重新排序后的列表。
+        """
+        from urllib.parse import urlparse
+        import random
+        import ipaddress
+
+        def normalize_key(ch):
+            """根据 group_by 返回分组 key（字符串）"""
+            try:
+                p = urlparse(ch.url)
+                host = p.hostname or ''
+            except Exception:
+                host = ''
+
+            gb = getattr(self, 'group_by', 'domain')
+            if gb == 'domain' or not host:
+                # domain 使用原始 host（小写）作为 key
+                return host.lower()
+
+            # 下面针对 ip / subnet
+            try:
+                # 如果 host 本身就是 ip（v4 或 v6），ipaddress 能解析
+                ipobj = ipaddress.ip_address(host)
+            except Exception:
+                # host 不是直接 IP，尝试解析域名到 IP（取第一个）
+                try:
+                    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+                    # infos 中 sockaddr 第一项包含 ip 字符串
+                    if infos:
+                        first = infos[0]
+                        sockaddr = first[4]
+                        host_ip = sockaddr[0]
+                        ipobj = ipaddress.ip_address(host_ip)
+                    else:
+                        return host.lower()
+                except Exception:
+                    return host.lower()
+
+            # 到这里 ipobj 是 ipaddress.IPv4Address 或 IPv6Address
+            if gb == 'ip':
+                return str(ipobj)
+
+            # subnet 模式
+            if gb == 'subnet':
+                if isinstance(ipobj, ipaddress.IPv4Address):
+                    # /24: 使用前三个八位字节
+                    parts = str(ipobj).split('.')
+                    if len(parts) >= 3:
+                        return '.'.join(parts[:3])
+                    return str(ipobj)
+                else:
+                    # IPv6: 使用前4段作为粗粒度分组
+                    hextets = ipobj.exploded.split(':')
+                    return ':'.join(hextets[:4])
+
+            # fallback
+            return host.lower()
+
+        buckets = {}
+        order = []
+        for ch in channels:
+            key = normalize_key(ch)
+            if key not in buckets:
+                buckets[key] = []
+                order.append(key)
+            buckets[key].append(ch)
+
+        # 随机化分组顺序以避免固定偏置
+        random.shuffle(order)
+
+        result = []
+        idx = 0
+        while True:
+            added = False
+            for key in order:
+                if idx < len(buckets[key]):
+                    result.append(buckets[key][idx])
+                    added = True
+            if not added:
+                break
+            idx += 1
+
+        return result
     
     def parse_txt_files(self, filepaths):
         """解析txt文件并提取频道信息"""
@@ -492,35 +591,53 @@ class UnicastProcessor:
         current_url = url
         max_redirects = 10
         
+        last_response = None
         while redirects_followed < max_redirects:
             try:
-                # 使用HEAD请求检查重定向，减少流量
+                # 优先用HEAD快速检查是否有重定向
                 response = requests.head(current_url, timeout=timeout, allow_redirects=False)
-                
+                last_response = response
+
                 if response.status_code in [301, 302, 303, 307, 308]:
                     # 获取重定向位置
                     location = response.headers.get('Location')
                     if not location:
                         break
-                    
+
                     # 处理相对URL
                     if not location.startswith('http'):
                         import urllib.parse
                         current_url = urllib.parse.urljoin(current_url, location)
                     else:
                         current_url = location
-                    
+
                     redirects_followed += 1
-                    
-                elif response.status_code == 200:
+                    continue
+
+                if response.status_code == 200:
                     return current_url
-                else:
-                    break
-                    
+
+                # 非重定向且非200，退出并由后续GET尝试
+                break
+
             except Exception:
-                # 重定向失败时返回原始URL
-                return url
-        
+                # HEAD 可能被服务器阻止或异常，跳出后使用GET尝试获取最终URL
+                break
+
+        # 最后尝试使用 GET 跟随重定向（某些服务器对 HEAD/GET 行为不一致）
+        try:
+            get_resp = requests.get(current_url, timeout=timeout, allow_redirects=True, stream=True)
+            # requests 会把最后的 URL 放在 .url
+            if get_resp.status_code == 200:
+                final_url = get_resp.url
+                get_resp.close()
+                return final_url
+            else:
+                get_resp.close()
+        except Exception:
+            pass
+
+        # 若都失败，返回当前已解析到的 URL（可能是最初的或中间重定向地址）
         return current_url
 
     def test_stream_speed(self, channel: ChannelInfo, timeout=8):
@@ -996,8 +1113,19 @@ class UnicastProcessor:
         
         tested_channels = []
         
+        # 选择并发 worker 数：优先使用 self.max_workers（如果用户指定），否则使用默认 16
+        workers = self.max_workers if getattr(self, 'max_workers', None) else 16
+        try:
+            workers = int(workers)
+            if workers < 1:
+                raise ValueError()
+        except Exception:
+            workers = 16
+
+        print(f"并发测试线程数: {workers}")
+
         # 进一步减少并发数，避免网络拥堵和系统资源耗尽
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(test_single_channel, i, channel) 
                       for i, channel in enumerate(channels)]
             
@@ -1278,6 +1406,11 @@ class UnicastProcessor:
         print(f"去重后剩余 {len(unique_channels)} 个频道")
         
         # 4. 测速
+        # 如果启用 spread，则在测速前将同源地址打散，降低单源并发压力
+        if getattr(self, 'spread', True):
+            unique_channels = self._spread_channels_across_domains(unique_channels)
+            print("已按源服务器打散地址以分散并发请求压力")
+
         tested_channels = self.speed_test_channels(unique_channels)
         
         # 5. 按频道名分组，每个频道保留速度最快的前N个URL
@@ -1313,6 +1446,13 @@ def main():
     
     parser.add_argument('--proxy', type=str, default=None,
                        help='代理服务器地址，格式：http://127.0.0.1:10808 (仅用于下载URL列表)')
+
+    parser.add_argument('--no-spread', action='store_true',
+                       help='不要在测速前打散同源地址（默认会打散以分散对同一服务器的并发访问）')
+    parser.add_argument('--group-by', choices=['domain','ip','subnet'], default='domain',
+                       help="分组策略：'domain' 按域名/host（默认），'ip' 按IP（去端口），'subnet' 按子网（IPv4 /24, IPv6 前4段）")
+    parser.add_argument('--max-workers', type=int, default=None,
+                       help='测速并发线程数（默认自动使用 16；可设置为更大或更小的正整数）')
     
     args = parser.parse_args()
     
@@ -1320,7 +1460,7 @@ def main():
         print("错误: --top 参数必须大于0")
         sys.exit(1)
     
-    processor = UnicastProcessor(top_count=args.top, proxy=args.proxy)
+    processor = UnicastProcessor(top_count=args.top, proxy=args.proxy, spread=not args.no_spread, group_by=args.group_by, max_workers=args.max_workers)
     processor.run()
 
 
