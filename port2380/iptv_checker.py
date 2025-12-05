@@ -26,7 +26,7 @@ SOURCE_CONFIG = {
         "output": "sxg.txt"
     },
     "yh": {
-        "test_path": "js-live-screenshot.gitv.tv/gitv_live/CCTV-1-HD/CCTV-1-HD.m3u8",
+        "test_path": "js-live-screenshot.gitv.tv/gitv_live/G_CCTV-8-HD-265-5M/G_CCTV-8-HD-265-5M.m3u8",
         "template": "dz-yh.txt",
         "output": "yh.txt"
     },
