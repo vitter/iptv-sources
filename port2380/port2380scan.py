@@ -33,7 +33,13 @@ class Port2380Scanner:
         # 加载环境变量
         load_dotenv()
         
-        self.region = region.capitalize() if region else None
+        # 处理地区参数：支持逗号分隔的多个地区
+        if region:
+            # 分割地区，去除空格，首字母大写
+            self.regions = [r.strip().capitalize() for r in region.split(',') if r.strip()]
+        else:
+            self.regions = []
+        
         self.isp = isp.lower() if isp else None
         self.max_pages = max_pages
         self.max_workers = max_workers
@@ -53,7 +59,13 @@ class Port2380Scanner:
         print("=" * 60)
         print("🔍 2380端口扫描工具")
         print("=" * 60)
-        print(f"地区: {self.region if self.region else '全国'}")
+        if self.regions:
+            if len(self.regions) == 1:
+                print(f"地区: {self.regions[0]}")
+            else:
+                print(f"地区: {', '.join(self.regions)} (共{len(self.regions)}个)")
+        else:
+            print(f"地区: 全国")
         print(f"运营商: {self.isp if self.isp else '全部'}")
         print(f"最大翻页: {self.max_pages}")
         print(f"并发数: {self.max_workers}")
@@ -82,10 +94,17 @@ class Port2380Scanner:
             查询字符串
         """
         # 基础查询：fid + port + country
-        if self.region:
-            base_query = f'fid="0FC01Psf64jTBZwBfHZoDg==" && port="2380" && product="OpenResty" && country="CN" && region="{self.region}"'
-        else:
-            base_query = f'fid="0FC01Psf64jTBZwBfHZoDg==" && port="2380" && product="OpenResty" && country="CN"'
+        base_query = f'fid="0FC01Psf64jTBZwBfHZoDg==" && port="2380" && product="OpenResty" && country="CN"'
+        
+        # 添加地区条件
+        if self.regions:
+            if len(self.regions) == 1:
+                # 单地区
+                base_query += f' && region="{self.regions[0]}"'
+            else:
+                # 多地区：使用 || 连接
+                region_conditions = " || ".join([f'region="{region}"' for region in self.regions])
+                base_query += f' && ( {region_conditions} )'
         
         # 根据运营商添加条件
         if self.isp == 'mobile':
@@ -161,7 +180,7 @@ class Port2380Scanner:
     
     def search_fofa_api(self) -> List[str]:
         """
-        使用FOFA API搜索IP:端口
+        使用FOFA连续翻页API搜索IP:端口
         
         Returns:
             IP:端口列表
@@ -170,12 +189,12 @@ class Port2380Scanner:
         query_b64 = base64.b64encode(query.encode()).decode().replace('\n', '')
         
         print("\n" + "=" * 60)
-        print("📡 从 FOFA API 检索 IP:端口")
+        print("📡 从 FOFA API 检索 IP:端口 (连续翻页模式)")
         print("=" * 60)
         print(f"搜索查询: {query}")
         print(f"最大翻页数: {self.max_pages}")
         
-        api_url = "https://fofa.info/api/v1/search/all"
+        api_url = "https://fofa.info/api/v1/search/next"
         all_ip_ports = []
         
         try:
@@ -186,14 +205,14 @@ class Port2380Scanner:
                 'Accept': 'application/json'
             })
             
-            # 第一次请求，获取总数据量
+            # 第一次请求参数（不带next参数）
             params = {
                 'key': self.fofa_api_key,
                 'qbase64': query_b64,
                 'fields': 'ip,port',
-                'size': 100,  # 每页100条
-                'page': 1,
-                'full': 'false'
+                'size': 200,  # 每页200条
+                'full': 'false',
+                'r_type': 'json'
             }
             
             print("\n🔄 发送第一次请求获取总数据量...")
@@ -217,12 +236,13 @@ class Port2380Scanner:
             # 获取结果数据
             total_size = response_json.get('size', 0)
             results = response_json.get('results', [])
+            next_id = response_json.get('next', '')
             
             print(f"📊 API返回总数据量: {total_size}")
-            print(f"📄 当前页结果数: {len(results)}")
+            print(f"📄 第1页结果数: {len(results)}")
             
             # 计算总页数
-            page_size = 100
+            page_size = 200
             total_pages = (total_size + page_size - 1) // page_size
             actual_pages = min(total_pages, self.max_pages)
             
@@ -233,39 +253,53 @@ class Port2380Scanner:
             all_ip_ports.extend(page_ip_ports)
             print(f"✓ 第1页提取到 {len(page_ip_ports)} 个IP:端口")
             
-            # 如果有多页，继续获取
-            if actual_pages > 1:
-                for page in range(2, actual_pages + 1):
-                    print(f"\n🔄 获取第 {page}/{actual_pages} 页...")
+            # 使用连续翻页接口继续获取后续页面
+            current_page = 1
+            while next_id and current_page < actual_pages:
+                current_page += 1
+                print(f"\n🔄 获取第 {current_page}/{actual_pages} 页...")
+                
+                # 添加next参数进行翻页
+                params['next'] = next_id
+                time.sleep(1)  # 避免API限流
+                
+                try:
+                    response = session.get(api_url, params=params, timeout=30)
+                    response.raise_for_status()
+                    response.encoding = 'utf-8'
                     
-                    params['page'] = page
-                    time.sleep(1)  # 避免API限流
+                    response_json = response.json()
                     
-                    try:
-                        response = session.get(api_url, params=params, timeout=30)
-                        response.raise_for_status()
-                        response.encoding = 'utf-8'
+                    if response_json.get('error', False):
+                        print(f"⚠️  第{current_page}页获取失败，跳过")
+                        break
+                    
+                    results = response_json.get('results', [])
+                    next_id = response_json.get('next', '')  # 更新next_id用于下一页
+                    
+                    if not results:
+                        print(f"⚠️  第{current_page}页无数据，停止翻页")
+                        break
+                    
+                    page_ip_ports = self._extract_results(results)
+                    all_ip_ports.extend(page_ip_ports)
+                    print(f"✓ 第{current_page}页提取到 {len(page_ip_ports)} 个IP:端口")
+                    
+                    # 如果没有next_id了，说明已经到最后一页
+                    if not next_id:
+                        print(f"✓ 已到达最后一页")
+                        break
                         
-                        response_json = response.json()
-                        
-                        if response_json.get('error', False):
-                            print(f"⚠️  第{page}页获取失败，跳过")
-                            continue
-                        
-                        results = response_json.get('results', [])
-                        page_ip_ports = self._extract_results(results)
-                        all_ip_ports.extend(page_ip_ports)
-                        print(f"✓ 第{page}页提取到 {len(page_ip_ports)} 个IP:端口")
-                        
-                    except Exception as e:
-                        print(f"⚠️  第{page}页请求失败: {e}")
-                        continue
+                except Exception as e:
+                    print(f"⚠️  第{current_page}页请求失败: {e}")
+                    break
             
             # 去重
             unique_ips = list(set(all_ip_ports))
             
             print("\n" + "=" * 60)
             print(f"📊 统计信息:")
+            print(f"  - 实际获取页数: {current_page}")
             print(f"  - 总共提取: {len(all_ip_ports)} 个")
             print(f"  - 去重后: {len(unique_ips)} 个")
             print("=" * 60)
@@ -295,7 +329,14 @@ class Port2380Scanner:
         ip_ports = []
         
         for result in results:
-            if len(result) >= 2:
+            # 连续翻页接口返回的是对象数组: {"host": "ip:port", "ip": "x.x.x.x", "port": xxxx}
+            if isinstance(result, dict):
+                ip = result.get('ip', '')
+                port = result.get('port', '')
+                if ip and port:
+                    ip_ports.append(f"{ip}:{port}")
+            # 传统接口返回的是数组的数组: ["ip", port]
+            elif isinstance(result, list) and len(result) >= 2:
                 ip = result[0]
                 port = result[1]
                 ip_ports.append(f"{ip}:{port}")
@@ -490,8 +531,14 @@ def main():
   # 扫描广东地区所有运营商的2380端口
   python port2380scan.py --region Guangdong
   
+  # 扫描多个地区（逗号分隔）
+  python port2380scan.py --region "shaanxi,shanxi,Nei Mongol,Guangxi Zhuangzu,Xinjiang Uygur,Ningxia Huizu"
+  
   # 扫描广东地区中国移动的2380端口
   python port2380scan.py --region Guangdong --isp mobile
+  
+  # 扫描多个地区的中国电信
+  python port2380scan.py --region Guangdong,Jiangsu,Zhejiang --isp telecom
   
   # 扫描北京地区，最多获取5页数据，使用20个并发
   python port2380scan.py --region Beijing --max-pages 5 --max-workers 20
@@ -505,7 +552,7 @@ def main():
         '--region',
         type=str,
         default=None,
-        help='省份/地区名称 (如: Guangdong, Beijing, Shanghai)，不指定则搜索全国'
+        help='省份/地区名称，支持单个或多个(逗号分隔)。如: Guangdong 或 Guangdong,Jiangsu,Hebei。不指定则搜索全国'
     )
     
     parser.add_argument(

@@ -39,14 +39,19 @@ SOURCE_CONFIG = {
         "test_path": "c3.cdn.hunancatv.com/live/CCTV1HD.m3u8",
         "template": "dz-hn.txt",
         "output": "hngd.txt"
+    },
+    "mobaibox": {
+        "test_path": "tptvh.mobaibox.com/hwcdnbacksourceflag_223.110.243.244/PLTV/4/224/3221228287/1.m3u8",
+        "template": "dz-mbh.txt",
+        "output": "mbh.txt"
     }
 }
 
 # 检测配置
 REQUEST_TIMEOUT = 10  # 请求超时时间（秒）
-MAX_ATTEMPTS = 50     # 最大尝试次数
-DELAY_BETWEEN_TESTS = 0.3  # 测试间隔（秒）
-MAX_WORKERS = 4       # 并发线程数
+MAX_ATTEMPTS = 5000     # 最大尝试次数
+DELAY_BETWEEN_TESTS = 0  # 测试间隔（秒）
+MAX_WORKERS = 40       # 并发线程数
 
 # ===== 核心功能 =====
 
