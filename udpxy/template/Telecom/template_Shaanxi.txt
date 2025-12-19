@@ -1,3 +1,12 @@
+北京卫视4K,http://ipipip/udp/239.111.205.51:5140
+湖南卫视4K,http://ipipip/udp/239.111.205.63:5140
+浙江卫视4K,http://ipipip/udp/239.111.205.65:5140
+江苏卫视4K,http://ipipip/udp/239.111.205.64:5140
+东方卫视4K,http://ipipip/udp/239.111.205.67:5140
+广东卫视4K,http://ipipip/udp/239.111.205.103:5140
+深圳卫视4K,http://ipipip/udp/239.111.205.104:5140
+四川卫视4K,http://ipipip/udp/239.111.205.62:5140
+山东卫视4K,http://ipipip/udp/239.111.205.66:5140
 4K,http://ipipip/udp/239.112.205.186:5140
 CCTV1,http://ipipip/udp/239.109.205.118:8880
 CCTV1,http://ipipip/udp/239.109.205.9:8000
