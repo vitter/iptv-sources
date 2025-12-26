@@ -12,7 +12,7 @@ downloads/
 *_result.txt
 itvlist.txt
 multicast_sources/
-generated_sources/
+generated_sources*
 mobile_udpxy.txt
 port2380/*.txt
 
