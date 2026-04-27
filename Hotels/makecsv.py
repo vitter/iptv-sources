@@ -190,9 +190,14 @@ class IPTVSourceCollector:
     
     def _get_quake360_time_range(self, days=29):
         """获取360 Quake的时间范围参数"""
-        # 360 Quake使用 start_time 和 end_time 参数，格式为 YYYY-MM-DD HH:MM:SS (UTC)
-        end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        start_time = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        # 注意：Quake360 API 的时间过滤功能可能需要付费账户
+        # 免费账户可能默认只返回近一年的数据，时间参数无效
+        from datetime import datetime
+        end_date = datetime.utcnow().date()
+        start_date = end_date - timedelta(days=days)
+        
+        start_time = f"{start_date} 00:00:00"
+        end_time = f"{end_date} 23:59:59"
         return start_time, end_time
     
     def _get_region_filter_fofa(self):
@@ -843,8 +848,8 @@ class IPTVSourceCollector:
             return []
     
     def search_quake360_api(self, query):
-        """使用Quake360 API搜索，支持翻页获取全部数据"""
-        print(f"===============从 Quake360 API 搜索===============")
+        """使用Quake360 API深度查询搜索，支持翻页获取全部数据"""
+        print(f"===============从 Quake360 API 深度查询===============")
         
         if not self.quake360_token:
             print("未配置QUAKE360_TOKEN，跳过Quake360搜索")
@@ -856,18 +861,9 @@ class IPTVSourceCollector:
         print(f"搜索查询: {query}")
         
         all_extracted_data = []
-        
-        # 第一次请求，获取总数据量
-        query_data = {
-            "query": query,  # 基础查询语句
-            "start": 0,
-            "size": 20,  # 每页20条数据
-            "ignore_cache": False,
-            "latest": True,
-            "shortcuts": ["635fcb52cc57190bd8826d09"],  # 排除蜜罐系统结果
-            "start_time": start_time,  # 查询起始时间，格式：2020-10-14 00:00:00，UTC时区
-            "end_time": end_time       # 查询截止时间，格式：2020-10-14 00:00:00，UTC时区
-        }
+        page = 1
+        page_size = 20
+        pagination_id = None
         
         headers = {
             'X-QuakeToken': self.quake360_token,
@@ -876,94 +872,80 @@ class IPTVSourceCollector:
         }
         
         try:
-            print("发送第一次请求获取总数据量...")
-            # 添加延迟避免API限流
-            time.sleep(2)
-            
-            response = requests.post(
-                'https://quake.360.net/api/v3/search/quake_service',
-                headers=headers,
-                json=query_data,
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            response_json = response.json()
-            
-            # 检查错误
-            code = response_json.get('code')
-            if code and str(code) not in ['0', '200', 'success']:
-                error_message = response_json.get('message', '未知错误')
-                print(f"Quake360 API错误: {code} - {error_message}")
-                return []
-            
-            # 获取总数据量和分页信息
-            meta = response_json.get('meta', {})
-            pagination = meta.get('pagination', {})
-            total_count = pagination.get('total', 0)
-            page_size = pagination.get('page_size', 20)
-            current_page = pagination.get('page_index', 1)
-            
-            print(f"总数据量: {total_count}")
-            print(f"当前页: {current_page}, 页面大小: {page_size}")
-            
-            # 计算总页数
-            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-            
-            # 应用最大页数限制
-            if self.max_pages is not None:
-                actual_pages = min(total_pages, self.max_pages)
-                print(f"总页数: {total_pages}, 限制最大页数: {self.max_pages}, 实际获取: {actual_pages} 页数据")
-            else:
-                actual_pages = total_pages
-                print(f"将获取 {total_pages} 页数据")
-            
-            # 处理第一页数据
-            first_page_data = response_json.get('data', [])
-            extracted_data = self._extract_quake360_results(first_page_data)
-            all_extracted_data.extend(extracted_data)
-            print(f"第1页提取到 {len(extracted_data)} 个有效结果")
-            
-            # 如果有多页，继续获取其他页的数据
-            if actual_pages > 1 and total_count > 0:
-                for page in range(2, actual_pages + 1):
-                    print(f"正在获取第 {page}/{actual_pages} 页数据...")
+            while True:
+                # 构建查询数据
+                query_data = {
+                    'query': query,
+                    'size': page_size,
+                    'ignore_cache': False,
+                    'latest': True,
+                    'shortcuts': ['635fcb52cc57190bd8826d09']
+                }
+                
+                # 添加 pagination_id（从第二次请求开始）
+                if pagination_id:
+                    query_data['pagination_id'] = pagination_id
+                
+                # 只有当 days < 29 时才添加时间参数（免费账户可能不支持时间过滤）
+                if self.days < 29:
+                    query_data['start_time'] = start_time
+                    query_data['end_time'] = end_time
+                
+                if page > 1:
+                    time.sleep(5)  # 增加延迟避免API限流
+                
+                print(f"正在获取第 {page} 页数据...")
+                
+                response = requests.post(
+                    'https://quake.360.net/api/v3/scroll/quake_service',
+                    headers=headers,
+                    json=query_data,
+                    timeout=30
+                )
+                response.raise_for_status()
+                
+                response_json = response.json()
+                
+                # 检查错误
+                code = response_json.get('code')
+                if code and str(code) not in ['0', '200', 'success']:
+                    error_message = response_json.get('message', '未知错误')
+                    print(f"Quake360 API错误: {code} - {error_message}")
+                    break
+                
+                data = response_json.get('data', []) or []
+                extracted_data = self._extract_quake360_results(data)
+                all_extracted_data.extend(extracted_data)
+                print(f"第{page}页提取到 {len(extracted_data)} 个有效结果")
+                
+                # 获取新的 pagination_id
+                meta = response_json.get('meta', {})
+                new_pagination_id = meta.get('pagination_id')
+                
+                # 第一次请求后获取 pagination_id 和总数据量
+                if page == 1 and new_pagination_id:
+                    pagination_id = new_pagination_id
+                    total_info = meta.get('total', {})
+                    if isinstance(total_info, dict):
+                        total_count = total_info.get('value', 0)
+                    else:
+                        total_count = total_info
                     
-                    # 更新分页参数
-                    query_data['start'] = (page - 1) * page_size
-                    
-                    # 添加延迟避免API限流 - 增加到5秒避免q3005错误
-                    time.sleep(5)
-                    
-                    try:
-                        response = requests.post(
-                            'https://quake.360.net/api/v3/search/quake_service',
-                            headers=headers,
-                            json=query_data,
-                            timeout=30
-                        )
-                        response.raise_for_status()
-                        
-                        response_json = response.json()
-                        
-                        # 检查错误
-                        code = response_json.get('code')
-                        if code and str(code) not in ['0', '200', 'success']:
-                            error_message = response_json.get('message', '未知错误')
-                            print(f"第{page}页Quake360 API错误: {code} - {error_message}")
-                            continue
-                        
-                        page_data = response_json.get('data', [])
-                        extracted_data = self._extract_quake360_results(page_data)
-                        all_extracted_data.extend(extracted_data)
-                        print(f"第{page}页提取到 {len(extracted_data)} 个有效结果")
-                        
-                    except KeyboardInterrupt:
-                        print(f"\n用户中断，已获取前 {page-1} 页数据")
-                        break
-                    except Exception as e:
-                        print(f"获取第{page}页数据失败: {e}")
-                        continue
+                    print(f"总数据量: {total_count}")
+                    if self.max_pages is not None:
+                        print(f"限制最大页数: {self.max_pages}")
+                
+                # 如果没有新数据，停止翻页
+                if not data:
+                    print("已到达最后一页")
+                    break
+                
+                # 检查最大页数限制
+                if self.max_pages is not None and page >= self.max_pages:
+                    print(f"已达到最大页数限制: {self.max_pages}")
+                    break
+                
+                page += 1
             
             print(f"Quake360 API总共提取到 {len(all_extracted_data)} 个有效结果")
             return all_extracted_data
