@@ -879,6 +879,7 @@ class IPTVSourceCollector:
                     'size': page_size,
                     'ignore_cache': False,
                     'latest': True,
+                    'include': ['ip', 'port'],
                     'shortcuts': ['635fcb52cc57190bd8826d09']
                 }
                 
